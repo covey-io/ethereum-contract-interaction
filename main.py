@@ -7,14 +7,13 @@ from web3.middleware import geth_poa_middleware
 import json
  
 
-
 load_dotenv()
 
 WALLET = os.getenv('WALLET') #public key 
 WALLET_PRIVATE_KEY = os.getenv('WALLET_PRIVATE_KEY')
 INFURA_PROJECT_ID = os.getenv('INFURA_PROJECT_ID') #set up an account with infura, it's free, toggle polychain to be on. 
 INFURA_URL = os.getenv('INFURA_URL') #'https://polygon-mainnet.infura.io/v3'
-POLYGON_CHAIN_ID= os.getenv('POLYGON_CHAIN_ID') #137
+POLYGON_CHAIN_ID = os.getenv('POLYGON_CHAIN_ID') #137
 COVEY_LEDGER_POLYGON_ADDRESS = os.getenv('COVEY_LEDGER_POLYGON_ADDRESS') #"0x587Ec5a7a3F2DE881B15776BC7aaD97AA44862Be"
 
 COVEY_LEDGER_SKALE_ADDRESS = os.getenv('COVEY_LEDGER_SKALE_ADDRESS')
