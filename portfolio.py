@@ -8,6 +8,7 @@ import json
 import pandas as pd
 import requests
 from datetime import datetime
+import time
 
 load_dotenv()
 
@@ -32,7 +33,7 @@ ledger_info = json.load(f)
 def is_number_repl_isdigit(s):
     """ Returns True is string is a number. """
     try:
-        return s.replace('.', '', 1).isdigit()
+        return s.lstrip("-").replace('.', '', 1).isdigit()
     except AttributeError:
         return False
 
@@ -57,7 +58,8 @@ def view_trades_polygon(address):
     my_address = w3.toChecksumAddress(address)
     result = covey_ledger.functions.getAnalystContent(my_address).call()
     # output format [('address', 'position string', unix time),('address', 'position string', unix time),...]
-    print(result)
+    #print(result)
+    return result
 
 
 def get_trades_double_chain(df):
@@ -66,20 +68,18 @@ def get_trades_double_chain(df):
     address = df['eth_cust_address'].unique()[0]
 
     # grab the trades
-    result = view_trades_skale(address)
-
-
-    # return empty single line dataframe if result is empty, unix timestamp (18000) is 1/1/1970
-    if len(result) == 0:
-        result_df = pd.DataFrame({'address': [address], 'symbol': ['BLANK'], 'target_position_value': [0],
-                             'date_time': [18000]}).set_index('address')
-        result_df['date_time'] = pd.to_datetime(result_df['date_time'], unit='s')
-
-        return result_df
+    result_skl = view_trades_skale(address)
+    result_poly = view_trades_polygon(address)
 
     # result list of tuples, output format [('address', 'position string', unix time),('address', 'position string',
     # unix time),...], to dataframe
-    result_df = pd.DataFrame(result, columns=['address', 'trades', 'date_time'])
+    result_skl_df = pd.DataFrame(result_skl, columns=['address', 'trades', 'date_time'])
+    result_skl_df.insert(0,'chain','SKL')
+    result_poly_df = pd.DataFrame(result_poly, columns=['address', 'trades', 'date_time'])
+    result_poly_df.insert(0, 'chain', 'MATIC')
+
+    # concatenate the separate chain dataframes into one
+    result_df = pd.concat([result_skl_df,result_poly_df])
 
     # convert unix time to datetime
     result_df['date_time'] = pd.to_datetime(result_df['date_time'], unit='s')
@@ -91,14 +91,17 @@ def get_trades_double_chain(df):
     result_df['trades'] = result_df['trades'].apply(lambda x: cleanup_trade_cells(x))
 
     # split trades column into symbol, position columns
-    result_df[['symbol', 'target_position_value']] = result_df['trades'].str.split(':', expand=True).iloc[:, 0:2]
+    try:
+        result_df[['symbol', 'target_position_value']] = result_df['trades'].str.split(':', expand=True).iloc[:, 0:2]
+    except ValueError:
+        result_df[['symbol', 'target_position_value']] = ['BLANK',0]
 
     # clean up the covey-reset, the target_position value should be numeric
     result_df['target_position_value'] = result_df['target_position_value'].apply(
         lambda x: x if is_number_repl_isdigit(x) else 0)
 
     # return result
-    return result_df[['address', 'symbol', 'target_position_value', 'date_time']].set_index('address')
+    return result_df[['chain','address', 'symbol', 'target_position_value', 'date_time']].set_index('address')
 
 
 def get_prices(symbols, exactDate):
@@ -151,7 +154,23 @@ def calculate_portfolio(address, startCash):
 # get_prices(['FB'],'2022-03-29')
 
 
+start_time = time.time()
+
+final_output_columns = ["date_time", "user_id", "cash", "usd_value", "positions_usd",
+                                      "inception_return", "gross_exposure_usd", "long_exposure_usd",
+                                      "short_exposure_usd", "net_exposure_usd", "gross_exposure_percent",
+                                      "long_exposure_percent", "short_exposure_percent", "net_exposure_percent",
+                                      "gross_traded_usd", "net_traded_usd", "gross_traded_percent",
+                                      "net_traded_percent", "unrealized_long_pnl", "unrealized_short_pnl",
+                                      "unrealized_pnl","realized_long_pnl", "realized_short_pnl", "realized_pnl",
+                                      "total_long_pnl", "total_short_pnl", "total_pnl"]
+
 wallets_df = pd.read_csv('data/allWallets.csv')
-wallets_df = wallets_df.iloc[:100, :]  # for testing
+#wallets_df = pd.read_csv('data/wallet_neg_sign_test.csv')
+wallets_df = wallets_df.iloc[:100,:]
 trading_key = wallets_df.groupby('eth_cust_address').apply(get_trades_double_chain)
+
+trading_key_out = pd.DataFrame()
 trading_key.to_csv('output/trading_key_' + datetime.now().strftime("%m_%d_%Y_%H_%M_%S") + '.csv')
+
+print("--- %s seconds ---" % (time.time() - start_time))
