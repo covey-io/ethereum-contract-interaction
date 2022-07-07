@@ -42,7 +42,7 @@ class Pricer():
         self.us_equity_symbols = kwargs.get('us_equity_symbols',['ARKK'])
 
         # Crypto Tickers
-        self.crypto_symbols = kwargs.get('crypto_tickers',['ETHUSD','BTCUSD','SKLUSD'])
+        self.crypto_symbols = kwargs.get('crypto_symbols',['SKLUSD'])
 
         # set the time frame - default to Hour
         self.timeframe = kwargs.get('timeframe',TimeFrame.Hour)

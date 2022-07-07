@@ -14,6 +14,8 @@ from dotenv import load_dotenv
 from alpaca_trade_api.rest import REST
 from datetime import datetime,timedelta
 from web3.middleware import geth_poa_middleware
+import warnings
+warnings.filterwarnings("ignore")
 
 # load environment variables (used below) that live in the .env file at the root of this project
 load_dotenv()
@@ -444,17 +446,18 @@ def updatePortfolioMath(userId, startCash, ann_interest = 0.02):
                  'cash_used',
                  'share_count',
                  'prior_cumulative_share_count',
-                 'post_cumulative_share_count'
+                 'post_cumulative_share_count',
+                 'adjusted_entry'
                  ]] = 0
 
-    trading_key.to_csv('trading_key.csv')
+
     prices.to_csv('prices.csv')
 
     # earliest trade date as start date
-    startDate = trading_key['delayed_trade_date'].min()
+    start_date = trading_key['delayed_trade_date'].min() + timedelta(days=-1)
 
     # initialize new portfolio
-    portfolio = pd.DataFrame({"date_time": startDate, "user_id": userId, "cash": startCash, "usd_value": startCash,
+    portfolio = pd.DataFrame({"date_time": start_date, "user_id": userId, "cash": startCash, "usd_value": startCash,
                 "positions_usd": 0,
                 "inception_return": 1.0, "gross_exposure_usd": 0.0, "long_exposure_usd": 0.0,
                 "short_exposure_usd": 0.0, "net_exposure_usd": 0.0, "gross_exposure_percent": 0.0,
@@ -470,15 +473,27 @@ def updatePortfolioMath(userId, startCash, ann_interest = 0.02):
 
 
     # generate dates based off price key
+    # new_portfolio = prices.copy()
+    # new_portfolio.drop(columns=['vwap','symbol','delayed_trade_date'], inplace=True)
+    # new_portfolio.drop_duplicates(inplace=True)
+    # new_portfolio['timestamp'] = new_portfolio['timestamp'].dt.tz_localize(None)
+    # new_portfolio.set_index('timestamp', inplace=True)
+    # portfolio = pd.concat([portfolio,new_portfolio])
+    # portfolio['user_id'] = portfolio['user_id'].ffill()
+    # prices.set_index('timestamp', inplace=True)
+
+    # generate dates based off price key
     new_portfolio = prices.copy()
-    new_portfolio.drop(columns=['vwap','symbol','delayed_trade_date'], inplace=True)
+    new_portfolio.drop(columns=['vwap', 'symbol'], inplace=True)
     new_portfolio.drop_duplicates(inplace=True)
     new_portfolio['timestamp'] = new_portfolio['timestamp'].dt.tz_localize(None)
-    new_portfolio.set_index('timestamp', inplace=True)
-    portfolio = pd.concat([portfolio,new_portfolio])
+    new_portfolio['max_timestamp'] = new_portfolio.groupby('delayed_trade_date')['timestamp'].transform(max)
+    new_portfolio.drop(columns=['delayed_trade_date', 'timestamp'], inplace=True)
+    new_portfolio.drop_duplicates(inplace=True)
+    new_portfolio.set_index('max_timestamp', inplace=True)
+    portfolio = pd.concat([portfolio, new_portfolio])
     portfolio['user_id'] = portfolio['user_id'].ffill()
     prices.set_index('timestamp', inplace=True)
-
 
     #portfolio.sort_index(ascending=True, inplace=True)
 
@@ -492,7 +507,7 @@ def updatePortfolioMath(userId, startCash, ann_interest = 0.02):
 
     # iterate through the new portfolio object with the recent trading activity being included
     # perform the math for portfolio
-    for row in range(1, 30): #len(portfolio.index)):
+    for row in range(1, len(portfolio.index)):
         portfolio.sort_index(ascending=True, inplace=True)
         # get get period
         end_date = portfolio.index[row] #.replace(tzinfo=None)
@@ -597,8 +612,8 @@ def updatePortfolioMath(userId, startCash, ann_interest = 0.02):
             dividendCash = getCashChangeFromDividends(end_date.replace(hour=0, minute=0, microsecond=0, second=0),
                                                          activeTrades)
             # check for splits
-            trading_key = getEntryAndPostCumShareFromSplits(trading_key, end_date, activeIds)
-            print('EOD :' + str(startDate) + ' BOD :' + str(end_date))
+            trading_key = getEntryAndPostCumShareFromSplits(trading_key, end_date.replace(hour=0, minute=0, microsecond=0, second=0), activeIds)
+            print('div-splits - EOD :' + str(start_date) + ' BOD :' + str(end_date))
 
         new_cash += dividendCash
 
@@ -642,7 +657,7 @@ def updatePortfolioMath(userId, startCash, ann_interest = 0.02):
                 shortUnrealizedPnl += unrealized_pnl
 
             # update current position
-            trading_key['current_position'].at[tradeId] = position
+            trading_key['current_position'].at[trade_id] = position
 
         # Now save the new portfolio
         portfolio['positions_usd'].iat[row] = positionsUsd
@@ -674,11 +689,8 @@ def updatePortfolioMath(userId, startCash, ann_interest = 0.02):
                                                 portfolio['realized_short_pnl'].iat[row]
         portfolio['total_pnl'].iat[row] = longUnrealizedPnl + shortUnrealizedPnl + portfolio['realized_pnl'].iat[row]
 
-        print(row)
 
-
-
-
+    trading_key.to_csv('trading_key.csv')
     portfolio.to_csv('portfolio.csv', index=True)
 
 

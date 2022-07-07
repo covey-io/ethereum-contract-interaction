@@ -14,6 +14,8 @@ from dotenv import load_dotenv
 from alpaca_trade_api.rest import REST
 from datetime import datetime,timedelta
 from web3.middleware import geth_poa_middleware
+import warnings
+warnings.filterwarnings("ignore")
 
 # load environment variables (used below) that live in the .env file at the root of this project
 load_dotenv()
@@ -694,9 +696,9 @@ if __name__ == '__main__':
     start_time = time.time()
     # calculate portfolio for particular address
     # BB Portfolio
-    port_df = calculate_portfolio('0x594F56D21ad544F6B567F3A49DB0F9a7B501FF37',10000)
+    # port_df = calculate_portfolio('0x594F56D21ad544F6B567F3A49DB0F9a7B501FF37',10000)
     # Vadim Portfolio
     # port_df = calculate_portfolio('0x55E580d9e296f9Ef7F02fe1516A0925629726801',10000)
     # ecd
-    # port_df = calculate_portfolio('0xf66aD6E503F8632c85C82027c9Df12FAE205e916',10000)
+    port_df = calculate_portfolio('0xf66aD6E503F8632c85C82027c9Df12FAE205e916',10000)
     print("---Portfolio finished in %s seconds ---" % (time.time() - start_time))
