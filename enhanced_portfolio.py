@@ -15,7 +15,7 @@ from alpaca_trade_api.rest import REST
 from datetime import datetime,timedelta
 from web3.middleware import geth_poa_middleware
 import warnings
-warnings.filterwarnings("ignore")
+# warnings.filterwarnings("ignore")
 
 # load environment variables (used below) that live in the .env file at the root of this project
 load_dotenv()
@@ -106,6 +106,9 @@ def get_trades_double_chain(df):
     # clean up the covey-reset, the target_position value should be numeric
     result_df['target_position_value'] = result_df['target_position_value'].apply(
         lambda x: x if is_number_repl_isdigit(x) else 0)
+
+    # remove timezone awareness
+    result_df['date_time'] = result_df['date_time'].dt.tz_localize(None)
 
     # return result
     return result_df[['chain','address', 'symbol', 'target_position_value', 'date_time']].set_index('address')
@@ -210,6 +213,9 @@ def generate_price_key(symbol_dates_df):
     # conversion for future date operations
     price_df['timestamp'] = pd.to_datetime(price_df['timestamp'])
 
+    # remove time zone awareness
+    price_df['timestamp'] = price_df['timestamp'].dt.tz_localize(None)
+
     # add in the delayed trade date column for future joining
     price_df['delayed_trade_date'] = price_df['timestamp'].dt.strftime('%Y-%m-%d')
 
@@ -220,7 +226,7 @@ def set_ref_trade_date_time(row):
     date_cols_to_convert = ['date_time','date','delayed_trade_date',
                             'delayed_trade_date_time','delayed_trade_date_closing_time','max_time_stamp']
     # adjust it to be the next hour where we will take the VWAP of that hour
-    row[date_cols_to_convert] = pd.to_datetime(row[date_cols_to_convert], utc=True)
+    row[date_cols_to_convert] = pd.to_datetime(row[date_cols_to_convert]) #, utc=True)
     trade_date_time_adj = row['date_time'] + timedelta(minutes=61)
     trade_date_time_adj = trade_date_time_adj.replace(minute=0, second=0)
 
@@ -398,6 +404,7 @@ def getRollingPrices(date, prices):
 
 def getDayDividends(endDate):
     df = pd.read_csv('data/dividend_split.csv')
+    df['record_date'] = pd.to_datetime(df['record_date'])
     df = df[(df['div_or_split'] == 'dividend') & (df['record_date'] == endDate)][['symbol','amount']]
     df.set_index('symbol',inplace=True)
     df = df.to_dict()
@@ -408,7 +415,7 @@ def getCashChangeFromDividends(endDate,activeTrades):
     dividendCash = 0
     for trade in activeTrades.keys() :
         if trade in activeDividends :
-            dividendPayment = float(activeTrades[trade]) *float(activeDividends[trade])
+            dividendPayment = float(activeTrades[trade]) * float(activeDividends[trade])
         else :
             dividendPayment = 0
         dividendCash += dividendPayment
@@ -499,11 +506,15 @@ def updatePortfolioMath(userId, startCash, ann_interest = 0.02):
 
     #portfolio.to_csv('blank_portfolio.csv')
     # positions accumulator and tracker
-    positions = pd.DataFrame(columns=['date_time', 'user_id', 'symbol',
-                                      'usd_position_value', 'percent_position',
-                                      'post_cumulative_share_count', 'price',
-                                      'entry_price', 'unrealized_pnl',
-                                      'pos_pnl' ,'pos_roi','marker'])
+    # positions = pd.DataFrame(columns=['date_time', 'user_id', 'symbol',
+    #                                   'usd_position_value', 'percent_position',
+    #                                   'post_cumulative_share_count', 'price',
+    #                                   'entry_price', 'unrealized_pnl',
+    #                                   'pos_pnl' ,'pos_roi','marker'])
+
+    # create an empty list that will be populated by dictionaries, after which
+    # we will use a pd.from_records method to finalize the positions dataframe
+    positions_list = []
 
     # iterate through the new portfolio object with the recent trading activity being included
     # perform the math for portfolio
@@ -611,9 +622,13 @@ def updatePortfolioMath(userId, startCash, ann_interest = 0.02):
             # check for dividends
             dividendCash = getCashChangeFromDividends(end_date.replace(hour=0, minute=0, microsecond=0, second=0),
                                                          activeTrades)
+
             # check for splits
             trading_key = getEntryAndPostCumShareFromSplits(trading_key, end_date.replace(hour=0, minute=0, microsecond=0, second=0), activeIds)
             print('div-splits - EOD :' + str(start_date) + ' BOD :' + str(end_date))
+
+        if dividendCash > 0:
+            print("{} added in dividend cash on {}".format(dividendCash,end_date))
 
         new_cash += dividendCash
 
@@ -647,7 +662,8 @@ def updatePortfolioMath(userId, startCash, ann_interest = 0.02):
                        'entry_price': entry_price, 'unrealized_pnl': unrealized_pnl,
                        'pos_pnl': posPnl, 'pos_roi': posRoi, 'marker': marker}
 
-            positions = positions.append(new_row, ignore_index=True)
+            #positions = positions.append(new_row, ignore_index=True)
+            positions_list.append(new_row)
 
             if position > 0:
                 longPositions += position
@@ -689,7 +705,7 @@ def updatePortfolioMath(userId, startCash, ann_interest = 0.02):
                                                 portfolio['realized_short_pnl'].iat[row]
         portfolio['total_pnl'].iat[row] = longUnrealizedPnl + shortUnrealizedPnl + portfolio['realized_pnl'].iat[row]
 
-
+    positions = pd.DataFrame.from_records(positions_list)
     trading_key.to_csv('trading_key.csv')
     portfolio.to_csv('portfolio.csv', index=True)
 
