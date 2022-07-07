@@ -190,6 +190,7 @@ def generate_price_key(symbol_dates_df):
 
     #replace the USDT with USD
     crypto_tickers = [c.replace('USDT','USD') for c in crypto_tickers]
+    print(crypto_tickers)
 
     hard_equity_exclusions = []
     equity_tickers = [e for e in tickers if not e.endswith('USDT') and e not in hard_equity_exclusions]
@@ -342,10 +343,10 @@ def generate_trades_with_prices(address: Optional[str] = None):
 def process_trade_snapshot(context,cartesian_df):
 
     # current block/day
-    context_df = cartesian_df[cartesian_df['portfolio_context_id'] == context]
+    context_df = cartesian_df[cartesian_df['portfolio_context_id'] == context].copy()
 
     # previous state
-    prev_df = cartesian_df[cartesian_df['portfolio_context_id'] ==  context - 1]
+    prev_df = cartesian_df[cartesian_df['portfolio_context_id'] ==  context - 1].copy()
 
     # first true trading block
     if context == 2:
@@ -361,8 +362,6 @@ def process_trade_snapshot(context,cartesian_df):
         context_df['post_cash'] =  prior_usd_value - context_df['positions_usd'].sum()
         # since it's the first trade block, share will equal post cumulative shares
         context_df['post_cumulative_shares'] = context_df['shares']
-        # set the end of day closing portfolio value
-        context_df['post_positions_usd'] = context_df['positions_usd']
 
     # further trading blocks
     elif context > 2:
@@ -389,8 +388,6 @@ def process_trade_snapshot(context,cartesian_df):
             # get what the prior positions were worth right before the current trading block happened
             # this will be helpful for cash adjustments when we resize positions
             context_df['prior_positions_usd'] = context_df['prior_shares'] * context_df['prior_close']
-            # set the end of day closing portfolio value
-            context_df['post_positions_usd'] = context_df['positions_usd']
 
         # we have trades
         else:
@@ -432,8 +429,6 @@ def process_trade_snapshot(context,cartesian_df):
             # summarize the post cumulative share amount (shares traded + prior share count)
             context_df['post_cumulative_shares'] = context_df['shares'] + context_df['prior_shares']
 
-            # set the end of day closing portfolio value
-            context_df['post_positions_usd'] = context_df['post_cumulative_shares'] * context_df['close_price']
 
             # print("We have {} trades for context {}".format(len(context_df.index)
             #                                                 - context_df['target_position_value'].isna().sum(),context))
@@ -443,16 +438,58 @@ def process_trade_snapshot(context,cartesian_df):
         context_df = context_df.drop(to_drop, axis = 1)
         context_df.set_index('ID', inplace=True)
 
-    # set the long exposure
-    context_df['long_exposure_usd'] = context_df.apply(lambda x:
+    # set the end of day closing portfolio value
+    context_df['post_positions_usd'] = context_df['post_cumulative_shares'] * context_df['close_price']
+
+    # long exposure (dollar)
+    context_df.loc[:,'long_exposure_usd'] = context_df.apply(lambda x:
                                                        x['post_positions_usd'] if x[
                                                                                       'post_positions_usd'] >= 0 else 0,
                                                        axis=1)
-    # set the short exposure
-    context_df['short_exposure_usd'] = context_df.apply(lambda x:
+    # short exposure (dollar)
+    context_df.loc[:,'short_exposure_usd'] = context_df.apply(lambda x:
                                                         x['post_positions_usd'] if x[
                                                                                        'post_positions_usd'] < 0 else 0,
                                                         axis=1)
+
+    # traded amount
+    context_df.loc[:,'long_traded_usd'] = context_df.apply(lambda x:
+                                                        x['entry_price'] * x['shares'] if x[
+                                                                                    'post_positions_usd'] >= 0 else 0,
+                                                        axis=1)
+    context_df.loc[:,'short_traded_usd'] = context_df.apply(lambda x:
+                                                        x['entry_price'] * x['shares'] if x[
+                                                                                    'post_positions_usd'] < 0 else 0,
+                                                        axis=1)
+
+    # realized pnl
+    context_df.loc[:,'realized_long_pnl'] = context_df.apply(lambda x :     (x['entry_price'] - x['last_known_entry']) *
+                                                                                abs(x['shares'])
+                                                                            # positive prior shares * negative shares (selling)
+                                                                            # should be < 0
+                                                                            if x['prior_shares'] * x['shares'] < 0 else 0,
+                                                        axis=1)
+
+    context_df.loc[:, 'realized_short_pnl'] = context_df.apply(lambda x : (x['entry_price'] - x['last_known_entry']) *
+                                                                                abs(x['shares'])
+                                                                            if x['prior_shares'] * x['shares'] > 0 else 0,
+                                                        axis=1)
+
+    # unrealized pnl (change in market value) + (change in cash)
+    context_df.loc[:, 'unrealized_long_pnl'] = context_df.apply(lambda x: (x['close_price'] - x['prior_close'])
+                                                                        * (x['post_cumulative_shares'])
+                                                                        if x[
+                                                                                     'post_positions_usd'] > 0 else 0,
+                                                              axis=1)
+
+    context_df.loc[:, 'unrealized_short_pnl'] = context_df.apply(lambda x:  (x['close_price'] - x['prior_close'])
+                                                                        * (x['post_cumulative_shares'])
+                                                                        if x[
+                                                                                     'post_positions_usd'] < 0 else 0,
+                                                              axis=1)
+
+
+
     # update the main cartesian
     cartesian_df.update(context_df)
 
@@ -498,10 +535,11 @@ def calculate_portfolio(address, startCash):
     cartesian_df['portfolio_context_id'] = cartesian_df['date'].rank(method='dense', ascending=True).astype(int)
     cartesian_df['prev_portfolio_context_id'] = cartesian_df['date'].rank(method='dense', ascending=True).astype(int) - 1
 
-    # initialize columns starting at zero shares, exposure, pnl
+    # initialize columns starting at zero : shares, exposure, pnl, traded amounts
     cartesian_df[['shares','post_cumulative_shares',
-                  'long_exposure_usd','short_exposure_usd']] = 0
-
+                  'long_exposure_usd','short_exposure_usd','long_traded_usd','short_traded_usd',
+                  'unrealized_long_pnl','unrealized_short_pnl','realized_long_pnl','realized_short_pnl'
+                  ]] = 0
 
     # get eod prices
     price_scope = 'delayed_trade_date' if temporal_scope == 'dalayed_trade_date' else 'timestamp'
@@ -511,7 +549,6 @@ def calculate_portfolio(address, startCash):
     #prices.to_csv('latest_prices.csv')
 
     latest_prices = prices[prices['timestamp'] == prices['max_timestamp']]
-
     # attach pricing
     cartesian_df = pd.merge(left=cartesian_df, right=latest_prices[['symbol', price_scope, 'vwap']], how='left',
                          left_on=['date', 'symbol'],
@@ -543,6 +580,8 @@ def calculate_portfolio(address, startCash):
 
     cartesian_df['prior_close'] = cartesian_df.groupby('symbol')['close_price'].shift()
 
+    cartesian_df['last_known_entry'] = cartesian_df.groupby('symbol')['entry_price'].shift()
+
     # initialize portfolio post position usd, this is the final portfolio value of the day
     # needed when we have trading at an entry price intra day and need to update its value at the end of the day
     cartesian_df['post_positions_usd'] = 0
@@ -555,13 +594,22 @@ def calculate_portfolio(address, startCash):
     for i in range(2, cartesian_df['portfolio_context_id'].max()+1):
         process_trade_snapshot(i, cartesian_df)
 
+    #cartesian_df = cartesian_df.groupby('portfolio_context_id')
+
     cartesian_df.to_csv('cartesian_df.csv')
 
     # collapse cartesian into portfolio and calculate inception to date returns
     portfolio_df = cartesian_df.groupby('date').agg({'post_cash':['mean'],
                                                      'post_positions_usd': 'sum',
                                                      'long_exposure_usd' : 'sum',
-                                                     'short_exposure_usd' : 'sum'})
+                                                     'short_exposure_usd' : 'sum',
+                                                     'long_traded_usd': 'sum',
+                                                     'short_traded_usd': 'sum',
+                                                     'realized_long_pnl': 'sum',
+                                                     'realized_short_pnl': 'sum',
+                                                     'unrealized_long_pnl': 'sum',
+                                                     'unrealized_short_pnl': 'sum'
+                                                     })
 
     # flatten the dual index
     portfolio_df.columns = [' '.join(col).strip() for col in portfolio_df.columns.values]
@@ -587,6 +635,16 @@ def calculate_portfolio(address, startCash):
     # get the latest per period
     portfolio_df['latest'] = portfolio_df.groupby('period')['date'].transform('max')
 
+    # sum up the long traded and short traded since they show up not necessarily on the 'latest' day of the portfolio agg.
+    portfolio_df['long_traded_usd'] = portfolio_df.groupby('period')['long_traded_usd sum'].transform('sum')
+    portfolio_df['short_traded_usd'] = portfolio_df.groupby('period')['short_traded_usd sum'].transform('sum')
+
+    # sum up the long/short realized/unrealized pnls
+    portfolio_df['realized_long_pnl'] = portfolio_df.groupby('period')['realized_long_pnl sum'].transform('sum')
+    portfolio_df['realized_short_pnl'] = portfolio_df.groupby('period')['realized_short_pnl sum'].transform('sum')
+    portfolio_df['unrealized_long_pnl'] = portfolio_df.groupby('period')['unrealized_long_pnl sum'].transform('sum')
+    portfolio_df['unrealized_short_pnl'] = portfolio_df.groupby('period')['unrealized_short_pnl sum'].transform('sum')
+
     # filter for latest per period
     portfolio_df = portfolio_df[portfolio_df['date'] == portfolio_df['latest']]
 
@@ -594,11 +652,40 @@ def calculate_portfolio(address, startCash):
 
     portfolio_df['itd_return'] = (portfolio_df['daily_returns'] +1).cumprod() - 1
 
+    # second order exposure $ columns : dollar exposure
     portfolio_df['gross_exposure_usd'] = portfolio_df['long_exposure_usd'] + abs(portfolio_df['short_exposure_usd'])
     portfolio_df['net_exposure_usd'] = portfolio_df['long_exposure_usd'] + portfolio_df['short_exposure_usd']
 
+    # second order exposure % columns : % exposure of NAV (portfolio_usd)
+    portfolio_df['gross_exposure_percent'] = portfolio_df['gross_exposure_usd'] / portfolio_df['portfolio_usd']
+    portfolio_df['long_exposure_percent'] = portfolio_df['long_exposure_usd'] / portfolio_df['portfolio_usd']
+    portfolio_df['short_exposure_percent'] = portfolio_df['short_exposure_usd'] / portfolio_df['portfolio_usd']
+    portfolio_df['net_exposure_percent'] = portfolio_df['net_exposure_usd'] / portfolio_df['portfolio_usd']
+
+    # second order traded columns
+    portfolio_df['gross_traded_usd'] = portfolio_df['long_traded_usd'] + abs(portfolio_df['short_traded_usd'])
+    portfolio_df['net_traded_usd'] = portfolio_df['long_traded_usd'] + portfolio_df['short_traded_usd']
+    portfolio_df['gross_traded_percent'] = portfolio_df['gross_traded_usd'] / portfolio_df['portfolio_usd']
+    portfolio_df['net_traded_percent'] = portfolio_df['net_traded_usd'] / portfolio_df['portfolio_usd']
+
+    # second order PnL Columns
+    portfolio_df['unrealized_pnl'] = portfolio_df['unrealized_long_pnl'] + portfolio_df['unrealized_short_pnl']
+    portfolio_df['realized_pnl'] = portfolio_df['realized_long_pnl'] + portfolio_df['realized_short_pnl']
+    portfolio_df['total_long_pnl'] = portfolio_df['unrealized_long_pnl'] + portfolio_df['realized_long_pnl']
+    portfolio_df['total_short_pnl'] = portfolio_df['unrealized_short_pnl'] + portfolio_df['realized_short_pnl']
+    portfolio_df['total_pnl'] = portfolio_df['total_long_pnl'] + portfolio_df['total_short_pnl']
+
+
+
+
     portfolio_df = portfolio_df[['date','user_id','cash_usd','portfolio_usd','daily_returns','itd_return',
-                                 'gross_exposure_usd','long_exposure_usd','short_exposure_usd','net_exposure_usd']]
+                                 'gross_exposure_usd','long_exposure_usd','short_exposure_usd','net_exposure_usd',
+                                 'gross_exposure_percent','long_exposure_percent','short_exposure_percent','net_exposure_percent',
+                                 'gross_traded_usd','net_traded_usd','gross_traded_percent','net_traded_percent',
+                                 'unrealized_long_pnl','unrealized_short_pnl','unrealized_pnl',
+                                 'realized_long_pnl','realized_short_pnl','realized_pnl',
+                                 'total_long_pnl','total_short_pnl','total_pnl']]
+
 
     portfolio_df.to_csv('portfolio.csv', index=False)
 
@@ -607,8 +694,9 @@ if __name__ == '__main__':
     start_time = time.time()
     # calculate portfolio for particular address
     # BB Portfolio
-    # port_df = calculate_portfolio('0x594F56D21ad544F6B567F3A49DB0F9a7B501FF37',10000)
-    #port_df = calculate_portfolio('0x55E580d9e296f9Ef7F02fe1516A0925629726801',10000)
+    port_df = calculate_portfolio('0x594F56D21ad544F6B567F3A49DB0F9a7B501FF37',10000)
+    # Vadim Portfolio
+    # port_df = calculate_portfolio('0x55E580d9e296f9Ef7F02fe1516A0925629726801',10000)
     # ecd
-    port_df = calculate_portfolio('0xf66aD6E503F8632c85C82027c9Df12FAE205e916',10000)
+    # port_df = calculate_portfolio('0xf66aD6E503F8632c85C82027c9Df12FAE205e916',10000)
     print("---Portfolio finished in %s seconds ---" % (time.time() - start_time))

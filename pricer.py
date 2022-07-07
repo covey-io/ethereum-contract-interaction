@@ -36,11 +36,10 @@ class Pricer():
         self.start = kwargs.get('start',pd.Timestamp('2021-12-31', tz=None).date().isoformat())
 
         # set the end date (if not provided) - None defaults to latest possible date
-        self.end = kwargs.get('end', pd.Timestamp('2022-06-18', tz=None).date().isoformat())
+        self.end = kwargs.get('end', pd.Timestamp('2022-07-05', tz=None).date().isoformat())
 
         # US Equity Tickers
-        self.us_equity_symbols = kwargs.get('us_equity_symbols',['FB', 'ABNB' ,'UBER' ,'SKLUSD', 'FNV' ,'WE' ,'COIN', 'CRM',
-                             'BKNG', 'MELI' ,'GLD' ,'MSFT', 'GRUB' ,'TLT', 'PLTR', 'V' ,'UNP' ,'FNF'])
+        self.us_equity_symbols = kwargs.get('us_equity_symbols',['ARKK'])
 
         # Crypto Tickers
         self.crypto_symbols = kwargs.get('crypto_tickers',['ETHUSD','BTCUSD','SKLUSD'])
