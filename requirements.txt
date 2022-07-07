@@ -39,5 +39,3 @@ varint
 web3
 websockets
 yarl
-nest_asyncio
-alpaca_trade_api
