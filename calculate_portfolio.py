@@ -237,7 +237,7 @@ def generate_price_key(symbol_dates_df):
 # for debugging sets the reference time as of which we look at prices starting from that time
 def set_ref_trade_date_time(row):
     date_cols_to_convert = ['date_time','date','delayed_trade_date',
-                            'delayed_trade_date_time','delayed_trade_date_closing_time','max_time_stamp']
+                            'delayed_trade_date_time','delayed_trade_date_closing_time']
     # adjust it to be the next hour where we will take the VWAP of that hour
     row[date_cols_to_convert] = pd.to_datetime(row[date_cols_to_convert]) #, utc=True)
     trade_date_time_adj = row['date_time'] + timedelta(minutes=61)
@@ -251,13 +251,28 @@ def set_ref_trade_date_time(row):
         new_dt = row['delayed_trade_date_time'] + timedelta(minutes=61)
     # trade during post-market hours but still on a business day
     elif trade_date_time_adj > row['delayed_trade_date_closing_time']:
-        new_dt = row['delayed_trade_date_closing_time']
+        new_dt = row['delayed_trade_date_time_next']
     else:
         new_dt = trade_date_time_adj
+
+
+    return new_dt.replace(minute=0, second=0)
+
+
+# for updating date time adj based off the prices that we see come in
+def check_max_timestamp(row):
+    date_cols_to_convert = ['max_time_stamp']
+
+    # adjust it to be the next hour where we will take the VWAP of that hour
+    row[date_cols_to_convert] = pd.to_datetime(row[date_cols_to_convert])  # , utc=True)
+    trade_date_time_adj = row['date_time'] + timedelta(minutes=61)
+    trade_date_time_adj = trade_date_time_adj.replace(minute=0, second=0)
 
     # price history doesn't go all the way up to the floor timestamp (delayed trade time adj)
     if row['max_time_stamp'] < trade_date_time_adj:
         new_dt = row['max_time_stamp']
+    else:
+        new_dt = row['date_time_adj']
 
     return new_dt.replace(minute=0, second=0)
 
@@ -315,6 +330,15 @@ def generate_trades_with_prices(address: Optional[str] = None):
     # clean up crypto tokens ending is USDT
     trading_key['symbol'] = trading_key['symbol'].apply(lambda x : x.replace('USDT','USD'))
 
+    # set the reference trade date time - adjusting for pre market and post market trade times
+    trading_key['date_time_adj'] = trading_key.apply(lambda x: set_ref_trade_date_time(x), axis=1)
+
+    # set the reference date
+    trading_key['date_adj'] = pd.to_datetime(trading_key['date_time_adj']).dt.date
+
+    # conversion for merge
+    trading_key['date_adj'] = pd.to_datetime(trading_key['date_adj'])
+
     # generate price key
     price_key = generate_price_key(symbol_day_key)
 
@@ -323,15 +347,18 @@ def generate_trades_with_prices(address: Optional[str] = None):
     print('Price Key finished in {} seconds'.format(time.time() - start_time))
 
     trading_key = pd.merge(left = trading_key, right = price_key, how='left',
-                           left_on=['symbol','delayed_trade_date'], right_on=['symbol','delayed_trade_date'])
+                           left_on=['symbol','date_adj'], right_on=['symbol','delayed_trade_date'])
 
 
     # set max timestamp of prices per trade id, just in case it doesn't show all history between expected open and close times
     # aka RUSL
     trading_key['max_time_stamp'] = trading_key.groupby('trade_id')['timestamp'].transform('max')
 
-    # set the reference trade date time - adjusting for pre market and post market trade times
-    trading_key['date_time_adj'] = trading_key.apply(lambda x : set_ref_trade_date_time(x), axis = 1)
+    # update max time stamp based on the new date time adj ref column
+    # if row['max_time_stamp'] < trade_date_time_adj:
+    #     new_dt = row['max_time_stamp']
+
+    trading_key['date_time_adj'] = trading_key.apply(lambda  x : check_max_timestamp(x), axis = 1)
 
     # fill in the blank timestamps (no prices returned for that ticker/date) so that it won't be filtered out in the next step
     # we want to see the un-priced items
@@ -347,6 +374,10 @@ def generate_trades_with_prices(address: Optional[str] = None):
 
     # don't need price rank anymore
     trading_key.drop(columns = ['price_rank'], inplace=True)
+
+    trading_key.rename(columns=lambda s: s.replace('_x', ''), inplace=True)
+
+    trading_key = trading_key.loc[:, ~trading_key.columns.str.endswith('_y')]
 
     # update the CoveyReset vwap prices to 0
     crypto_check_df = check_crypto_tickers(trading_key)
@@ -366,7 +397,7 @@ def getMostRecentTrade(dateAsOf, tradingKey):
     ids = []
     currentPosition = []
     realizedProfits = []
-    asOf = (tradingKeyCopy['date_time'] < dateAsOf)
+    asOf = (tradingKeyCopy['date_adj'] < dateAsOf)
     recent = tradingKeyCopy.loc[asOf]
     tickerList = list(set(recent['symbol']))
 
@@ -437,8 +468,8 @@ def getCashChangeFromDividends(endDate,activeTrades):
 def getDaySplits(endDate):
     df = pd.read_csv('data/dividend_split.csv')
     df['payment_date'] = pd.to_datetime(df['payment_date'])
-    df = df[(df['div_or_split'] == 'split') & (df['payment_date'] == endDate)][['symbol','amount']]
-    df.set_index('symbol',inplace=True)
+    df = df[(df['div_or_split'] == 'split') & (df['payment_date'] == endDate)][['symbol', 'amount']]
+    df.set_index('symbol', inplace=True)
     df = df.to_dict()
     return df['amount']
 
@@ -447,8 +478,8 @@ def getEntryAndPostCumShareFromSplits(tradingKey,endDate,activeIds):
     for trade in activeIds.keys() :
         if trade in activeSplits :
             # update adjusted_entry
-            tradingKey['adjusted_entry'].at[activeIds[trade]] = tradingKey['entry_price'].at[activeIds[trade]]
-            tradingKey['entry_price'].at[activeIds[trade]] = tradingKey['entry_price'].at[activeIds[trade]] * activeSplits[trade]
+            tradingKey['adjusted_entry'].at[activeIds[trade]] = tradingKey['vwap'].at[activeIds[trade]]
+            tradingKey['vwap'].at[activeIds[trade]] = tradingKey['vwap'].at[activeIds[trade]] * activeSplits[trade]
             tradingKey['post_cumulative_share_count'].at[activeIds[trade]] = tradingKey['post_cumulative_share_count'].at[activeIds[trade]] / activeSplits[trade]
     return tradingKey
 
@@ -475,7 +506,7 @@ def updatePortfolioMath(userId, startCash, ann_interest = 0.02):
     prices.to_csv('prices.csv')
 
     # earliest trade date as start date
-    start_date = trading_key['delayed_trade_date'].min() + timedelta(days=-1)
+    start_date = trading_key['date_adj'].min() + timedelta(days=-1)
 
     # initialize new portfolio
     portfolio = pd.DataFrame({"date_time": start_date, "user_id": userId, "cash": startCash, "usd_value": startCash,
@@ -550,7 +581,7 @@ def updatePortfolioMath(userId, startCash, ann_interest = 0.02):
         new_cash = prior_cash + cash_interest_payment
 
         # grab the new trades (in scope of the time period)
-        new_trades = trading_key[(trading_key['date_time'] > start_date) & (trading_key['date_time'] <= end_date)]
+        new_trades = trading_key[(trading_key['date_adj'] > start_date) & (trading_key['date_adj'] <= end_date)]
 
         # get the previous portfolio value
         prior_portfolio_usd = portfolio['usd_value'].iat[row - 1]
@@ -730,12 +761,12 @@ if __name__ == '__main__':
     # BB Portfolio
     # port_df = updatePortfolioMath('0x594F56D21ad544F6B567F3A49DB0F9a7B501FF37',10000)
     # Vadim Portfolio
-    # port_df = updatePortfolioMath('0x55E580d9e296f9Ef7F02fe1516A0925629726801',10000)
+    port_df = updatePortfolioMath('0x55E580d9e296f9Ef7F02fe1516A0925629726801',10000)
     # ecd
     # port_df = calculate_portfolio('0xf66aD6E503F8632c85C82027c9Df12FAE205e916',10000)
     # user id 1
     # port_df = updatePortfolioMath('0x49649d164e7aa196ef7bb6ad8eab00d658305eaa',10000)
     # 7/6/22 test
-    port_df = updatePortfolioMath('0xd019955e5Db68ebd41CE5A7A327DdD5f2658e8D9', 10000)
+    # port_df = updatePortfolioMath('0xd019955e5Db68ebd41CE5A7A327DdD5f2658e8D9', 10000)
 
     print("---Portfolio finished in %s seconds ---" % (time.time() - start_time))
