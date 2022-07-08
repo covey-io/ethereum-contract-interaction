@@ -134,6 +134,9 @@ def get_delayed_trade_calendar(trade_key):
     date_df = pd.DataFrame({'date': pd.date_range(start=start_date,
                                                   end=delayed_trade_date_time_df['delayed_trade_date_time'].max())})
 
+    # next raw date so that we can get the 'next delayed trade open
+    date_df['date_next'] = date_df['date'] + timedelta(days=1)
+
     # conversion for merging
     delayed_trade_date_time_df['delayed_trade_date'] = \
         pd.to_datetime(delayed_trade_date_time_df['delayed_trade_date_time']).dt.date
@@ -142,10 +145,20 @@ def get_delayed_trade_calendar(trade_key):
     delayed_trade_date_time_df['delayed_trade_date'] = pd.to_datetime(
         delayed_trade_date_time_df['delayed_trade_date'])
 
+
     # merging agnostic dates with business dates
     bus_date_key_df = pd.merge(left=date_df, right=delayed_trade_date_time_df,
                                how='left', left_on='date',
                                right_on='delayed_trade_date')
+
+    # merging agnostic dates with business dates (for next business day)
+    bus_date_key_df = pd.merge(left=bus_date_key_df, right=delayed_trade_date_time_df,
+                               how='left', left_on='date_next',
+                               right_on='delayed_trade_date')
+
+    # drop all the _x and replace _y with _next
+    bus_date_key_df.rename(columns=lambda s: s.replace('_x', '').replace('_y', '_next'), inplace=True)
+    #bus_date_key_df.rename(columns=lambda s: s.replace('_y', '_next'), inplace=True)
 
     # back-filling empty merge results so that the next business day propgates backwards for non business days
     bus_date_key_df.fillna(method='bfill', inplace=True)
@@ -404,8 +417,8 @@ def getRollingPrices(date, prices):
 
 def getDayDividends(endDate):
     df = pd.read_csv('data/dividend_split.csv')
-    df['record_date'] = pd.to_datetime(df['record_date'])
-    df = df[(df['div_or_split'] == 'dividend') & (df['record_date'] == endDate)][['symbol','amount']]
+    df['payment_date'] = pd.to_datetime(df['payment_date'])
+    df = df[(df['div_or_split'] == 'dividend') & (df['payment_date'] == endDate)][['symbol','amount']]
     df.set_index('symbol',inplace=True)
     df = df.to_dict()
     return df['amount']
@@ -423,8 +436,9 @@ def getCashChangeFromDividends(endDate,activeTrades):
 
 def getDaySplits(endDate):
     df = pd.read_csv('data/dividend_split.csv')
-    df = df[(df['div_or_split'] == 'split') & (df['record_date'] == endDate)][['symbol', 'amount']]
-    df.set_index('symbol', inplace=True)
+    df['payment_date'] = pd.to_datetime(df['payment_date'])
+    df = df[(df['div_or_split'] == 'split') & (df['payment_date'] == endDate)][['symbol','amount']]
+    df.set_index('symbol',inplace=True)
     df = df.to_dict()
     return df['amount']
 

@@ -1,0 +1,3 @@
+eth_cust_address,address,chain,symbol,target_position_value,date_time,trade_id,date,date_next,delayed_trade_date_time,delayed_trade_date_closing_time,delayed_trade_date,timestamp,vwap,max_time_stamp,date_time_adj
+0xd019955e5Db68ebd41CE5A7A327DdD5f2658e8D9,0x211FE601e24cE89Cb443356F687C67fbf7708412,SKL,ALGOUSD,0.011,2021-12-31 00:40:22,70,2021-12-31,2022-01-01,2021-12-31 14:30:00,2021-12-31 21:00:00,2021-12-31,2021-12-31 15:00:00,,,2021-12-31 15:00:00
+0xd019955e5Db68ebd41CE5A7A327DdD5f2658e8D9,0xd019955e5Db68ebd41CE5A7A327DdD5f2658e8D9,SKL,ALGOUSD,0.005,2022-04-12 13:30:55,412,2022-04-12,2022-04-13,2022-04-12 13:30:00,2022-04-12 20:00:00,2022-04-12,2022-04-12 14:00:00,,,2022-04-12 14:00:00
