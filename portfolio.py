@@ -12,6 +12,8 @@ class Portfolio(Trade):
         self.start_cash = kwargs.get('start_cash', 10000)
         # default annual interest to 0.2 %
         self.ann_interest = kwargs.get('ann_interest', 0.02)
+        # generate the portfolio
+        self.portfolio = self.updatePortfolioMath()
 
     def getMostRecentTrade(self, dateAsOf, tradingKey):
         tradingKeyCopy = tradingKey.fillna(0)
@@ -113,8 +115,6 @@ class Portfolio(Trade):
 
         trading_key = self.trading_key.copy()
 
-        trading_key = trading_key[~trading_key['vwap'].isnull()]
-
         trading_key[['post_cumulative_share_count','realized_profit','prior_portfolio_value',
                      'current_position',
                      'prior_position_value',
@@ -128,6 +128,8 @@ class Portfolio(Trade):
 
         # earliest trade date as start date
         start_date = trading_key['market_entry_date'].min() + timedelta(days=-1)
+
+        trading_key = trading_key[~trading_key['vwap'].isnull()]
 
         # initialize new portfolio
         portfolio = pd.DataFrame({'date_time': start_date.strftime('%Y-%m-%d'),
@@ -185,9 +187,9 @@ class Portfolio(Trade):
             new_cash = prior_cash + cash_interest_payment
 
             # grab the new trades (in scope of the time period)
-            trading_key['market_entry_date'] = pd.to_datetime(trading_key['market_entry_date'])
-            new_trades = trading_key[(trading_key['market_entry_date'] > start_date) &
-                                     (trading_key['market_entry_date'] <= end_date)]
+            trading_key['market_entry_date_time'] = pd.to_datetime(trading_key['market_entry_date_time'])
+            new_trades = trading_key[(trading_key['market_entry_date_time'] > start_date) &
+                                     (trading_key['market_entry_date_time'] <= end_date)]
 
             # get the previous portfolio value
             prior_portfolio_usd = portfolio['usd_value'].iat[row - 1]
@@ -360,30 +362,44 @@ class Portfolio(Trade):
             portfolio['total_pnl'].iat[row] = longUnrealizedPnl + shortUnrealizedPnl + portfolio['realized_pnl'].iat[row]
 
         positions = pd.DataFrame.from_records(positions_list)
-        trading_key.to_csv('output/trading_key_post_calc.csv')
-        portfolio.to_csv('output/portfolio.csv', index=True)
 
+        return portfolio
+
+        # export to csv
+    def export_to_csv(self, key: str = 'trading'):
+        if key == 'trading':
+            self.trading_key.to_csv('output/trading_key.csv', index=False)
+        elif key == 'price':
+            self.price_key.to_csv('output/price_key.csv')
+        elif key == 'portfolio':
+            self.portfolio.to_csv('output/portfolio.csv')
 
 if __name__ == '__main__':
     # start the timer
     start_time = time.time()
 
     # load environment variables (used below) that live in the .env file at the root of this project
-    load_dotenv()
-
+    # load_dotenv()
     # environment variables, pulled from the .env file
-    address = os.getenv('WALLET')
-    infura_url = os.getenv('INFURA_URL') + '/' + os.getenv('INFURA_PROJECT_ID')
-    covey_ledger_polygon_address = os.getenv('COVEY_LEDGER_POLYGON_ADDRESS')
-    covey_ledger_skale_address = os.getenv('COVEY_LEDGER_SKALE_ADDRESS')
-    skale_url = os.getenv('SKALE_URL')
+    # address = os.getenv('WALLET')
+    # infura_url = os.getenv('INFURA_URL') + '/' + os.getenv('INFURA_PROJECT_ID')
+    # covey_ledger_polygon_address = os.getenv('COVEY_LEDGER_POLYGON_ADDRESS')
+    # covey_ledger_skale_address = os.getenv('COVEY_LEDGER_SKALE_ADDRESS')
+    # skale_url = os.getenv('SKALE_URL')
+    # p = Portfolio(address='0xd019955e5Db68ebd41CE5A7A327DdD5f2658e8D9',
+    #               infura_url=infura_url,
+    #               skale_url=skale_url,
+    #               covey_ledger_polygon_address=covey_ledger_polygon_address,
+    #               covey_ledger_skale_address=covey_ledger_skale_address)
 
-    p = Portfolio(address='0xd019955e5Db68ebd41CE5A7A327DdD5f2658e8D9',
-                  infura_url=infura_url,
-                  skale_url=skale_url,
-                  covey_ledger_polygon_address=covey_ledger_polygon_address,
-                  covey_ledger_skale_address=covey_ledger_skale_address)
+    #p = Portfolio(address='0x0d97A0E7e42eB70d013a2a94179cEa0E815dAE41')
 
-    p.updatePortfolioMath()
+    p = Portfolio(address='0x55E580d9e296f9Ef7F02fe1516A0925629726801')
+
+    p.export_to_csv(key='trading')
+
+    p.export_to_csv(key='price')
+
+    p.export_to_csv(key='portfolio')
 
     print("---Portfolio finished in %s seconds ---" % (time.time() - start_time))

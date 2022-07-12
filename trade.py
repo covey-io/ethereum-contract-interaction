@@ -1,12 +1,14 @@
 import json
 import time
 import asyncio
+import eth_keys
 import pandas as pd
 import nest_asyncio
 from web3 import Web3
 from price import Pricer
 from datetime import timedelta
 from dotenv import load_dotenv
+from eth_account import account
 from covey_calendar import CoveyCalendar
 from web3.middleware import geth_poa_middleware
 
@@ -18,9 +20,15 @@ class Trade:
         # in case running with nested async CLIs (i.e. Jupyter Notebook, Pycharm IDE (cough))
         nest_asyncio.apply()
 
-        # get the address, default to Brooker
-        self.address = kwargs.get('address', '0x594F56D21ad544F6B567F3A49DB0F9a7B501FF37')
+        # Geth web3 for account stuff
+        self.gethWeb3 = Web3(Web3.IPCProvider())
 
+        # get the address, default to Brooker
+        self.address = kwargs.get('address', '0xc4B8929609AC322648C6C87F0E5978Ea8236b392')
+
+        # wallet (address) secret key
+        self.address_private = kwargs.get('address_private',
+                                      'f08728c92a64f56978d98466e05f65363330bf1dd614f0cd98d476bf08cdaadf')
         # skale url
         self.skale_url = kwargs.get('skale_url', 'https://api.skalenodes.com/v1/rhythmic-tegmen')
 
@@ -35,6 +43,11 @@ class Trade:
         # covey ledger address (polygon)
         self.covey_ledger_polygon_address = kwargs.get('covey_ledger_polygon_address',
                                                      '0x587Ec5a7a3F2DE881B15776BC7aaD97AA44862Be')
+        # polygon chain id
+        self.polygon_chain_id = kwargs.get('polygon_chain_id', 137)
+
+        # skale chain id
+        self.skale_chain_id = kwargs.get('skale_chain_id', 3707172096179956)
 
         # set the abi - must pass in the covey ledger file here otherwise will not work
         self.abi = json.load(open('CoveyLedger.json'))['abi']
@@ -55,8 +68,76 @@ class Trade:
         # generate trading key with prices
         self.trading_key = self.get_trading_key()
 
+    # getter to return the address from child class if needed, or in current class - either works
     def get_address(self):
         print(self.address)
+
+    # The password here MUST match the password you used to generate your accounts, otherwise it will fail
+    def get_private_keys(self, password):
+        wallets_list = self.gethWeb3.geth.personal.list_wallets()
+        for i in wallets_list:
+            address = i['accounts'][0].address
+            keyfile_path = i['accounts'][0].url.replace("keystore://", "").replace("\\", "/")
+            keyfile = open(keyfile_path)
+            keyfile_contents = keyfile.read()
+            keyfile.close()
+            private_key = eth_keys.keys.PrivateKey(account.Account.decrypt(keyfile_contents, password))
+            public_key = private_key.public_key
+            private_key_str = str(private_key)
+            public_key_str = str(public_key)
+            print(f'Address: {address} Private Key: {private_key_str}')
+
+    # The password used here must match the password used to generate the address you are feeding into here
+    def get_private_key(self, address, password):
+        wallets_list = self.gethWeb3.geth.personal.list_wallets()
+        keyfile_path = (
+            wallets_list[list(i['accounts'][0]['address'].lower() for i in wallets_list).index(address)][
+                'url']).replace(
+            "keystore://", "").replace("\\", "/")
+        keyfile = open(keyfile_path)
+        keyfile_contents = keyfile.read()
+        keyfile.close()
+        private_key = eth_keys.keys.PrivateKey(account.Account.decrypt(keyfile_contents, password))
+        public_key = private_key.public_key
+
+        private_key_str = str(private_key)
+        public_key_str = str(public_key)
+        print(private_key_str)
+
+    def post_trades_polygon(self,positionString):
+        w3 = Web3(Web3.HTTPProvider(self.infura_url))
+        w3.middleware_onion.inject(geth_poa_middleware, layer=0)
+        covey_ledger = w3.eth.contract(address=self.covey_ledger_polygon_address, abi=self.abi)
+        my_address = w3.toChecksumAddress(self.address)
+        nonce = w3.eth.get_transaction_count(my_address)
+        gas = covey_ledger.functions. createContent(positionString).estimateGas({'from': my_address, 'nonce': nonce})
+        txn = covey_ledger.functions.createContent(positionString).buildTransaction({
+            'chainId': int(self.polygon_chain_id),
+            'gas': gas,
+            'nonce': nonce,
+            'from': my_address
+        })
+        signed_txn = w3.eth.account.sign_transaction(txn, private_key=self.address_private)
+        w3.eth.send_raw_transaction(signed_txn.rawTransaction)
+        print('Posted Trade to: {} for positions: {} on polygon'.format(self.address,positionString))
+
+    def post_trades_skale(self,positionString):
+        '''TESTING STILL - DO NOT USE YET'''
+        w3 = Web3(Web3.HTTPProvider(self.skale_url))
+        w3.middleware_onion.inject(geth_poa_middleware, layer=0)
+        covey_ledger = w3.eth.contract(address=self.covey_ledger_skale_address, abi=self.abi)
+        my_address = w3.toChecksumAddress(self.address)
+        nonce = w3.eth.get_transaction_count(my_address)
+        # gas = covey_ledger.functions.createContent(positionString).estimateGas({'from': my_address, 'nonce': nonce})
+        txn = covey_ledger.functions.createContent(positionString).buildTransaction({
+            'chainId': int(self.skale_chain_id),
+            'gas': 21000,
+            'nonce': nonce,
+            'from': my_address
+        })
+        signed_txn = w3.eth.account.sign_transaction(txn, private_key=self.address_private)
+        w3.eth.send_raw_transaction(signed_txn.rawTransaction)
+        print('Posted Trade to: {} for positions: {} on skale'.format(self.address,positionString))
 
     # output format [('address', 'position string', unix time),('address', 'position string', unix time),...]
     async def get_trades_skale(self):
@@ -244,20 +325,24 @@ class Trade:
             print("The trades data frame has not been filled yet")
 
     # export to csv
-    def export_to_csv(self):
-        self.trading_key.to_csv('output/trading_key.csv', index=False)
+    def export_to_csv(self, key : str = 'trading'):
+        if key == 'trading':
+            self.trading_key.to_csv('output/trading_key.csv', index=False)
+        elif key == 'price':
+            self.price_key.to_csv('output/price_key.csv', index=False)
 
 
 if __name__ == '__main__':
     # start the timer
     start_time = time.time()
-    # initialize trade data object, default will be BB portfolio
-    t = Trade(address='0xd019955e5Db68ebd41CE5A7A327DdD5f2658e8D9')
-    # print initial trade pull
+    # initialize trade data object - all defaults
+    t = Trade()
+    # # print initial trade pull
     # print(t.trades)
-    #print(t.trades['symbol'].unique())
-    # print the priced trades (trading Key)
-    print(t.trading_key)
+    # # print the priced trades (trading Key)
+    # print(t.trading_key)
+    # post trades
+    t.post_trades_polygon('FB:0.1,FNF:0.2,BTCUSDT:0.2,FNV:0.2,PLTR:0.2,GPS:0.2')
     # export
     t.export_to_csv()
     # log how long it took
