@@ -46,7 +46,8 @@ def post_trades_polygon(positionString):
     'from': my_address
   })
   signed_txn = w3.eth.account.sign_transaction(txn, private_key=WALLET_PRIVATE_KEY)
-  w3.eth.send_raw_transaction(signed_txn.rawTransaction)  
+  w3.eth.send_raw_transaction(signed_txn.rawTransaction)
+  print(f'Posted Trade to: {WALLET} for positions: {positionString} on polygon')
 
 def post_trades_skale(positionString):
   '''TESTING STILL - DO NOT USE YET'''
@@ -65,7 +66,9 @@ def post_trades_skale(positionString):
     'from': my_address
   })
   signed_txn = w3.eth.account.sign_transaction(txn, private_key=WALLET_PRIVATE_KEY)
-  w3.eth.send_raw_transaction(signed_txn.rawTransaction)  
+  w3.eth.send_raw_transaction(signed_txn.rawTransaction)
+  print(f'Posted Trade to: {WALLET} for positions: {positionString} on skale')
+
 
 # The password here MUST match the password you used to generate your accounts, otherwise it will fail
 def get_private_keys(password):
@@ -99,7 +102,7 @@ def get_private_key(address, password):
 
 
 
-#post_trades_polygon('FB:0.1,FNF:0.2,BTCUSDT:0.2,FNV:0.2,PLTR:0.2,GPS:0.2')
+post_trades_polygon('FB:0.1,FNF:0.2,BTCUSDT:0.2,FNV:0.2,PLTR:0.2,GPS:0.2')
 #get_private_keys("password")
 #get_private_key("0xd3170f3405782d38fbf9ccb291e143b9702c0659", "password")
 #get_private_key("0x1aba07fe746e690d917117315cd42c6dad6cb4c6", "password")
