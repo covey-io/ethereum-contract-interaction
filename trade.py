@@ -110,7 +110,7 @@ class Trade:
         covey_ledger = w3.eth.contract(address=self.covey_ledger_polygon_address, abi=self.abi)
         my_address = w3.toChecksumAddress(self.address)
         nonce = w3.eth.get_transaction_count(my_address)
-        gas = covey_ledger.functions. createContent(positionString).estimateGas({'from': my_address, 'nonce': nonce})
+        gas = covey_ledger.functions.createContent(positionString).estimateGas({'from': my_address, 'nonce': nonce})
         txn = covey_ledger.functions.createContent(positionString).buildTransaction({
             'chainId': int(self.polygon_chain_id),
             'gas': gas,

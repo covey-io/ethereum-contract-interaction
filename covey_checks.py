@@ -1,5 +1,3 @@
-
-
 # a check to see which crypto tickers that should be priced, that have not been
 def check_crypto_tickers(trading_key):
     # crypto ticker check for alpaca
@@ -13,8 +11,9 @@ def check_crypto_tickers(trading_key):
     df = trading_key
 
     # mask for tickers desired
-    df =df[df['symbol'].isin(alpaca_crypto_tickers)]
+    df = df[df['symbol'].isin(alpaca_crypto_tickers)]
 
     # find the NaN prices
     df = df[df['vwap'].isnull()]
+
     return df

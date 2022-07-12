@@ -1,8 +1,7 @@
-import os
 import time
 import pandas as pd
 from trade import Trade
-from dotenv import load_dotenv
+import covey_checks as covey_checks
 from datetime import timedelta
 
 class Portfolio(Trade):
@@ -14,6 +13,8 @@ class Portfolio(Trade):
         self.ann_interest = kwargs.get('ann_interest', 0.02)
         # generate the portfolio
         self.portfolio = self.updatePortfolioMath()
+        # generate crypto pricing error report
+        self.unpriced_crypto = covey_checks.check_crypto_tickers(self.trading_key)
 
     def getMostRecentTrade(self, dateAsOf, tradingKey):
         tradingKeyCopy = tradingKey.fillna(0)
@@ -373,11 +374,12 @@ class Portfolio(Trade):
             self.price_key.to_csv('output/price_key.csv')
         elif key == 'portfolio':
             self.portfolio.to_csv('output/portfolio.csv')
+        elif key == 'crypto_check':
+            self.unpriced_crypto.to_csv('checks/unpriced_crypto_{}.csv'.format(self.address))
 
 if __name__ == '__main__':
     # start the timer
     start_time = time.time()
-
     # load environment variables (used below) that live in the .env file at the root of this project
     # load_dotenv()
     # environment variables, pulled from the .env file
@@ -397,9 +399,8 @@ if __name__ == '__main__':
     p = Portfolio(address='0x55E580d9e296f9Ef7F02fe1516A0925629726801')
 
     p.export_to_csv(key='trading')
-
     p.export_to_csv(key='price')
-
     p.export_to_csv(key='portfolio')
+    p.export_to_csv(key='crypto_check')
 
     print("---Portfolio finished in %s seconds ---" % (time.time() - start_time))
