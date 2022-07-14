@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 
 class CoveyCalendar:
     def __init__(self, **kwargs):
+        load_dotenv()
         # get the start date, default to 3 years ago
         self.start_date = kwargs.get('start_date', (datetime.now() - timedelta(days=3*365)).strftime('%Y-%m-%d'))
         # get the end date, default to today
@@ -70,9 +71,7 @@ class CoveyCalendar:
 
 if __name__ == '__main__':
     start_time = time.time()
-    load_dotenv()
     c = CoveyCalendar()
-
     print(c.business_dates.columns)
 
 

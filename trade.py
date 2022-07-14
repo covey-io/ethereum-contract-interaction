@@ -190,13 +190,13 @@ class Trade:
             self.trades['trades'] = self.trades['trades'].apply(lambda x: self.cleanup_trade_cells(x))
             # split trades column into symbol, position columns
             try:
-                self.trades[['symbol', 'target_position_value']] = self.trades['trades'].str.split(':', expand=True).iloc[:,
+                self.trades[['symbol', 'target_percentage']] = self.trades['trades'].str.split(':', expand=True).iloc[:,
                                                                  0:2]
             except ValueError:
-                self.trades[['symbol', 'target_position_value']] = ['BLANK', 0]
+                self.trades[['symbol', 'target_percentage']] = ['BLANK', 0]
 
-            # clean up the covey-reset, the target_position value should be numeric
-            self.trades['target_position_value'] = self.trades['target_position_value'].apply(
+            # clean up the covey-reset, the target_percentage should be numeric
+            self.trades['target_percentage'] = self.trades['target_percentage'].apply(
                 lambda x: x if self.is_number_repl_isdigit(x) else 0)
 
             # remove timezone awareness
@@ -210,6 +210,8 @@ class Trade:
 
             # set the trade ID
             self.trades['trade_id'] = [x for x in range(1, len(self.trades.values) + 1)]
+
+            self.trades = self.check_ticker_change(self.trades)
 
         else:
             print("The trades dataframe has not been filled yet")
@@ -253,6 +255,16 @@ class Trade:
             new_dt = row['market_entry_date_time']
 
         return new_dt.replace(minute=0, second=0)
+
+    # check for ticker changes, i.e. CREE -> WOLF on 10/1/2021
+    def check_ticker_change(self,trading_key):
+        ticker_change_df = pd.read_csv('data/ticker_changes.csv')
+        df = pd.merge(left = trading_key, right = ticker_change_df, how = 'left', left_on = 'symbol', right_on='symbol')
+        df['record_date'] = pd.to_datetime(df['record_date'])
+        df['symbol'] = df.apply(lambda x : x['new_symbol'] if x['record_date'] <= x['entry_date_time'] else x['symbol'],
+                                axis=1)
+
+        return df
 
     # adding market entry price to trades
     def get_trading_key(self):
@@ -310,14 +322,16 @@ class Trade:
 
             df = df.loc[:, ~df.columns.str.endswith('_y')]
 
+
             # making sure we did not lose any trades in the price merge
             post_price_row_count = len(df.index)
 
             assert (pre_price_row_count == post_price_row_count)
 
-            columns_to_return = ['trade_id','address','chain','symbol','target_position_value',
+            columns_to_return = ['trade_id','address','chain','symbol','target_percentage',
                                  'entry_date_time','next_market_open', 'market_entry_date_time',
-                                 'market_entry_date','vwap']
+                                 #'market_entry_date',
+                                 'vwap']
 
             return df[columns_to_return]
 

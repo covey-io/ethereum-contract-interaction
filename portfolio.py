@@ -23,7 +23,7 @@ class Portfolio(Trade):
         ids = []
         currentPosition = []
         realizedProfits = []
-        asOf = (tradingKeyCopy['market_entry_date'] < dateAsOf)
+        asOf = (tradingKeyCopy['market_entry_date_time'] < dateAsOf)
         recent = tradingKeyCopy.loc[asOf]
         tickerList = list(set(recent['symbol']))
 
@@ -59,6 +59,13 @@ class Portfolio(Trade):
         currentList = dict(zip(newTickerList, currentPosition))
         realizedList = dict(zip(newTickerList, realizedProfits))
 
+        df = {'tickers':shares, 'prices': entryPrice , 'trade_id' : ids,
+              'position_usd' : currentPosition, 'realized_profit' : realizedProfits}
+
+        #print(dateAsOf)
+        #print(pd.DataFrame(df))
+
+
         return shareList, priceList, idList, currentList, realizedList
 
     # now get the most recent rolling prices for the unique tickers and date
@@ -83,8 +90,8 @@ class Portfolio(Trade):
     def getCashChangeFromDividends(self, endDate, activeTrades):
         activeDividends = self.getDayDividends(endDate)
         dividendCash = 0
-        for trade in activeTrades.keys() :
-            if trade in activeDividends :
+        for trade in activeTrades.keys():
+            if trade in activeDividends:
                 dividendPayment = float(activeTrades[trade]) * float(activeDividends[trade])
             else :
                 dividendPayment = 0
@@ -101,8 +108,8 @@ class Portfolio(Trade):
 
     def getEntryAndPostCumShareFromSplits(self, tradingKey, endDate, activeIds):
         activeSplits = self.getDaySplits(endDate)
-        for trade in activeIds.keys() :
-            if trade in activeSplits :
+        for trade in activeIds.keys():
+            if trade in activeSplits:
                 # update adjusted_entry
                 tradingKey['adjusted_entry'].at[activeIds[trade]] = tradingKey['vwap'].at[activeIds[trade]]
                 tradingKey['vwap'].at[activeIds[trade]] = tradingKey['vwap'].at[activeIds[trade]] * activeSplits[trade]
@@ -116,7 +123,10 @@ class Portfolio(Trade):
 
         trading_key = self.trading_key.copy()
 
-        trading_key[['post_cumulative_share_count','realized_profit','prior_portfolio_value',
+        trading_key[[#'target_position_value',
+                     'post_cumulative_share_count',
+                     'realized_profit',
+                     'prior_portfolio_value',
                      'current_position',
                      'prior_position_value',
                      'cash_used',
@@ -128,9 +138,9 @@ class Portfolio(Trade):
 
 
         # earliest trade date as start date
-        start_date = trading_key['market_entry_date'].min() + timedelta(days=-1)
+        start_date = trading_key['market_entry_date_time'].min() + timedelta(days=-1)
 
-        trading_key = trading_key[~trading_key['vwap'].isnull()]
+        #trading_key = trading_key[~trading_key['vwap'].isnull()]
 
         # initialize new portfolio
         portfolio = pd.DataFrame({'date_time': start_date.strftime('%Y-%m-%d'),
@@ -186,14 +196,15 @@ class Portfolio(Trade):
             long_realized_profit = 0
             short_realized_profit = 0
             new_cash = prior_cash + cash_interest_payment
+            # get the previous portfolio value
+            prior_portfolio_usd = portfolio['usd_value'].iat[row - 1]
 
             # grab the new trades (in scope of the time period)
             trading_key['market_entry_date_time'] = pd.to_datetime(trading_key['market_entry_date_time'])
             new_trades = trading_key[(trading_key['market_entry_date_time'] > start_date) &
                                      (trading_key['market_entry_date_time'] <= end_date)]
 
-            # get the previous portfolio value
-            prior_portfolio_usd = portfolio['usd_value'].iat[row - 1]
+
 
             # if we have trades
             if len(new_trades.index) > 0:
@@ -201,7 +212,7 @@ class Portfolio(Trade):
                     # first figure out the old vs. new position size and proposed cash impact
                     ticker = new_trades['symbol'].iat[trade]
                     price = new_trades['vwap'].iat[trade]
-                    percent = new_trades['target_position_value'].iat[trade]
+                    percent = new_trades['target_percentage'].iat[trade]
                     tradeId = new_trades.index[trade]
 
                     # Check if there are prior positions:
@@ -223,7 +234,6 @@ class Portfolio(Trade):
 
                     prior_value = price * prior_shares
 
-                    #print(type(percent), type(prior_portfolio_usd))
                     new_value = float(percent) * prior_portfolio_usd
                     cash_hit = prior_value - new_value
                     # now get feeAdj price
@@ -231,7 +241,7 @@ class Portfolio(Trade):
 
                     # now save the trade info
                     trading_key['prior_portfolio_value'].at[tradeId] = prior_portfolio_usd
-                    trading_key['target_position_value'].at[tradeId] = new_value
+                    #trading_key['target_position_value'].at[tradeId] = new_value
                     trading_key['current_position'].at[tradeId] = new_value
                     trading_key['prior_position_value'].at[tradeId] = prior_value
                     trading_key['cash_used'].at[tradeId] = cash_hit
@@ -254,7 +264,7 @@ class Portfolio(Trade):
             # work with the active trades
             activeTrades, activeEntryPrice, activeIds, activePositions, activeRealized = self.getMostRecentTrade(end_date,
                                                                                                             trading_key)
-            #print(activeTrades)
+
             # get all prices for trades that have happened
             activePrices = self.getRollingPrices(end_date, prices)
 
@@ -350,7 +360,8 @@ class Portfolio(Trade):
             portfolio['unrealized_long_pnl'].iat[row] = longUnrealizedPnl
             portfolio['unrealized_short_pnl'].iat[row] = shortUnrealizedPnl
             portfolio['unrealized_pnl'].iat[row] = longUnrealizedPnl + shortUnrealizedPnl
-            portfolio['realized_long_pnl'].iat[row] = cash_interest_payment + dividendCash + long_realized_profit + portfolio['realized_long_pnl'].iat[row - 1]
+            portfolio['realized_long_pnl'].iat[row] = cash_interest_payment + dividendCash + long_realized_profit \
+                                                      + portfolio['realized_long_pnl'].iat[row - 1]
             portfolio['realized_short_pnl'].iat[row] = short_realized_profit + portfolio['realized_short_pnl'].iat[
                 row - 1]
             portfolio['realized_pnl'].iat[row] = cash_interest_payment + dividendCash + long_realized_profit + short_realized_profit + \
@@ -363,6 +374,8 @@ class Portfolio(Trade):
             portfolio['total_pnl'].iat[row] = longUnrealizedPnl + shortUnrealizedPnl + portfolio['realized_pnl'].iat[row]
 
         positions = pd.DataFrame.from_records(positions_list)
+
+        self.trading_key = trading_key
 
         return portfolio
 
@@ -396,7 +409,7 @@ if __name__ == '__main__':
 
     #p = Portfolio(address='0x0d97A0E7e42eB70d013a2a94179cEa0E815dAE41')
 
-    p = Portfolio(address='0x55E580d9e296f9Ef7F02fe1516A0925629726801')
+    p = Portfolio(address='0xd019955e5Db68ebd41CE5A7A327DdD5f2658e8D9')
 
     p.export_to_csv(key='trading')
     p.export_to_csv(key='price')
