@@ -330,13 +330,40 @@ class Trade:
 
             columns_to_return = ['trade_id','address','chain','symbol','target_percentage',
                                  'entry_date_time','next_market_open', 'market_entry_date_time',
-                                 #'market_entry_date',
                                  'vwap']
 
-            return df[columns_to_return]
+            df_post_merge_check = self.merger_check(df[columns_to_return])
+
+            return df_post_merge_check
 
         else:
             print("The trades data frame has not been filled yet")
+
+    def merger_check(self, trading_key):
+        merger_df = pd.read_csv('data/mergers.csv')
+        df = trading_key.copy()
+        df = pd.merge(left=df, right=merger_df, how = 'left', left_on = 'symbol', right_on='symbol')
+        df['is_merger'] = df.apply(lambda x  : 0 if pd.isnull(x['entry_price']) else 1, axis = 1)
+        df['symbol_appearance_rank'] = df.groupby('symbol')['trade_id'].rank('dense', ascending=True)
+        mergers_only_df = df.loc[(df['is_merger'] == 1) & (df['symbol_appearance_rank'] == 1)]
+        mergers_only_df['entry_date_time'] = mergers_only_df['entry_date_time'].dt.normalize()
+        mergers_only_df['market_entry_date_time'] = mergers_only_df['market_entry_date_time'] + timedelta(days = 1)
+        mergers_only_df['vwap'] = mergers_only_df['entry_price']
+        mergers_only_df['target_percentage'] = 0
+
+        # remove tickers from main trading key copy that are mergers and after the first instance
+        df = df.loc[~((df['is_merger'] == 1) & (df['symbol_appearance_rank'] > 1))]
+
+        concat_df = pd.concat([df,mergers_only_df[trading_key.columns]])
+        concat_df = concat_df[trading_key.columns]
+
+        # re-establish trade id
+        concat_df = concat_df.sort_values(by = 'market_entry_date_time', ascending=True)
+        concat_df['trade_id'] = [x for x in range(1, len(concat_df.values) + 1)]
+
+        return concat_df
+
+
 
     # export to csv
     def export_to_csv(self, key : str = 'trading'):

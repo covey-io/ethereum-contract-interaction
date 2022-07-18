@@ -55,6 +55,6 @@ class CorporateActions:
 
 if __name__== '__main__':
 
-    ca = CorporateActions(start_date='2021-12-31', end_date='2022-07-14')
+    ca = CorporateActions(start_date='2019-12-31', end_date='2022-07-14')
 
     ca.mergers.to_csv('data/mergers.csv')

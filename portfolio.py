@@ -140,7 +140,7 @@ class Portfolio(Trade):
         # earliest trade date as start date
         start_date = trading_key['market_entry_date_time'].min() + timedelta(days=-1)
 
-        #trading_key = trading_key[~trading_key['vwap'].isnull()]
+        trading_key = trading_key[~trading_key['vwap'].isnull()]
 
         # initialize new portfolio
         portfolio = pd.DataFrame({'date_time': start_date.strftime('%Y-%m-%d'),
@@ -292,6 +292,8 @@ class Portfolio(Trade):
                 trading_key = self.getEntryAndPostCumShareFromSplits(trading_key,
                                                                      end_date.replace(hour=0, minute=0, microsecond=0,
                                                                                       second=0), activeIds)
+
+                # check for mergers
                 print('div-splits - EOD :' + str(start_date) + ' BOD :' + str(end_date))
 
             if dividendCash > 0:
@@ -409,11 +411,10 @@ if __name__ == '__main__':
 
     #p = Portfolio(address='0x0d97A0E7e42eB70d013a2a94179cEa0E815dAE41')
 
-    p = Portfolio(address='0xd019955e5Db68ebd41CE5A7A327DdD5f2658e8D9')
-
-    p.export_to_csv(key='trading')
+    p = Portfolio(address='0x594F56D21ad544F6B567F3A49DB0F9a7B501FF37')
     p.export_to_csv(key='price')
+    p.export_to_csv(key='trading')
     p.export_to_csv(key='portfolio')
-    p.export_to_csv(key='crypto_check')
+
 
     print("---Portfolio finished in %s seconds ---" % (time.time() - start_time))
