@@ -179,7 +179,7 @@ if __name__ == '__main__':
 
     # initialize 'the pricer' (naming done by VS it may not be his best work, open to changing!)
     # the class has default variables for required start,end,tickers,timeframe so we don't need to pass anything to test
-    p = Pricer()
+    p = Pricer(symbols = ['AAPL','GOOGL','IBM'])
 
     print(p.price_key)
 
