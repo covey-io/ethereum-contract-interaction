@@ -171,7 +171,6 @@ class Portfolio(Trade):
         calendar_key_df = pd.DataFrame(calendar_key[calendar_key['date'] < datetime.now().replace(hour=0,minute=0, second=0, microsecond =0)]['next_market_close'].unique()).set_index(0)
         calendar_key_df.index = calendar_key_df.index.append(pd.Index([prices.reset_index()['timestamp'].max()]))
 
-
         #new_portfolio.drop(columns=['vwap', 'symbol'], inplace=True)
         #new_portfolio.drop_duplicates(inplace=True)
         # new_portfolio['timestamp'] = new_portfolio['timestamp'].dt.tz_localize(None)
@@ -213,6 +212,8 @@ class Portfolio(Trade):
             trading_key['market_entry_date_time'] = pd.to_datetime(trading_key['market_entry_date_time'])
             new_trades = trading_key[(trading_key['market_entry_date_time'] > start_date) &
                                      (trading_key['market_entry_date_time'] <= end_date)]
+
+            new_trades = new_trades.sort_values(by = 'entry_date_time')
 
 
             # if we have trades
@@ -420,7 +421,7 @@ if __name__ == '__main__':
 
     #p = Portfolio(address='0x0d97A0E7e42eB70d013a2a94179cEa0E815dAE41')
 
-    p = Portfolio(address='0xd019955e5Db68ebd41CE5A7A327DdD5f2658e8D9')
+    p = Portfolio(address='0x594F56D21ad544F6B567F3A49DB0F9a7B501FF37')
     p.export_to_csv(key='price')
     p.export_to_csv(key='trading')
     p.export_to_csv(key='portfolio')

@@ -4,11 +4,13 @@ import asyncio
 import pandas as pd
 import nest_asyncio
 from enum import Enum
+from datetime import datetime
+from dotenv import load_dotenv
 import alpaca_trade_api as tradeapi
 from alpaca_trade_api.rest import TimeFrame, URL
 from alpaca_trade_api.rest_async import  gather_with_concurrency, AsyncRest
-from dotenv import load_dotenv
-from datetime import datetime
+
+
 
 NY = 'America/New_York'
 
