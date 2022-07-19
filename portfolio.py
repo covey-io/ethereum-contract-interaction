@@ -1,8 +1,9 @@
 import time
 import pandas as pd
 from trade import Trade
+from covey_calendar import CoveyCalendar
 import covey_checks as covey_checks
-from datetime import timedelta
+from datetime import datetime,timedelta
 
 class Portfolio(Trade):
     def __init__(self, **kwargs):
@@ -162,16 +163,24 @@ class Portfolio(Trade):
 
         # generate dates based off price key
         prices = self.price_key
-        new_portfolio = prices.copy()
+        #new_portfolio = prices.copy()
+
+        # calendar key 
+        c = CoveyCalendar(start_date = prices['delayed_trade_date'].min())
+        calendar_key = c.set_business_dates()
+        calendar_key_df = pd.DataFrame(calendar_key[calendar_key['date'] < datetime.now().replace(hour=0,minute=0, second=0, microsecond =0)]['next_market_close'].unique()).set_index(0)
+        calendar_key_df.index = calendar_key_df.index.append(pd.Index([prices.reset_index()['timestamp'].max()]))
+
+
         #new_portfolio.drop(columns=['vwap', 'symbol'], inplace=True)
         #new_portfolio.drop_duplicates(inplace=True)
-        new_portfolio['timestamp'] = new_portfolio['timestamp'].dt.tz_localize(None)
-        new_portfolio['max_symbol_timestamp'] = new_portfolio.groupby(['delayed_trade_date','symbol'])['timestamp'].transform(max)
-        new_portfolio['common_timestamp_denominator'] = new_portfolio.groupby('delayed_trade_date')['max_symbol_timestamp'].transform(min)
-        new_portfolio.drop(columns=['delayed_trade_date', 'timestamp','max_symbol_timestamp','vwap', 'symbol'], inplace=True)
-        new_portfolio.drop_duplicates(inplace=True)
-        new_portfolio.set_index('common_timestamp_denominator', inplace=True)
-        portfolio = pd.concat([portfolio, new_portfolio])
+        # new_portfolio['timestamp'] = new_portfolio['timestamp'].dt.tz_localize(None)
+        # new_portfolio['max_symbol_timestamp'] = new_portfolio.groupby(['delayed_trade_date','symbol'])['timestamp'].transform(max)
+        # new_portfolio['common_timestamp_denominator'] = new_portfolio.groupby('delayed_trade_date')['max_symbol_timestamp'].transform(min)
+        # new_portfolio.drop(columns=['delayed_trade_date', 'timestamp','max_symbol_timestamp','vwap', 'symbol'], inplace=True)
+        # new_portfolio.drop_duplicates(inplace=True)
+        # new_portfolio.set_index('common_timestamp_denominator', inplace=True)
+        portfolio = pd.concat([portfolio, calendar_key_df])
         portfolio['user_id'] = portfolio['user_id'].ffill()
         prices.set_index('timestamp', inplace=True)
 
@@ -204,7 +213,6 @@ class Portfolio(Trade):
             trading_key['market_entry_date_time'] = pd.to_datetime(trading_key['market_entry_date_time'])
             new_trades = trading_key[(trading_key['market_entry_date_time'] > start_date) &
                                      (trading_key['market_entry_date_time'] <= end_date)]
-
 
 
             # if we have trades
@@ -412,7 +420,7 @@ if __name__ == '__main__':
 
     #p = Portfolio(address='0x0d97A0E7e42eB70d013a2a94179cEa0E815dAE41')
 
-    p = Portfolio(address='0x594F56D21ad544F6B567F3A49DB0F9a7B501FF37')
+    p = Portfolio(address='0xd019955e5Db68ebd41CE5A7A327DdD5f2658e8D9')
     p.export_to_csv(key='price')
     p.export_to_csv(key='trading')
     p.export_to_csv(key='portfolio')
