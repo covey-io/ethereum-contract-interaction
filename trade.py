@@ -24,11 +24,11 @@ class Trade:
         self.gethWeb3 = Web3(Web3.IPCProvider())
 
         # get the address, default to Brooker
-        self.address = kwargs.get('address', '0xc4B8929609AC322648C6C87F0E5978Ea8236b392')
+        self.address = kwargs.get('address', '0x1aBA07FE746E690D917117315cd42C6DAd6cb4C6')
 
         # wallet (address) secret key
         self.address_private = kwargs.get('address_private',
-                                      'f08728c92a64f56978d98466e05f65363330bf1dd614f0cd98d476bf08cdaadf')
+                                      'baf62ad09bb993c666577d435845cfe34a255473904186dde18f54438a430940')
         # skale url
         self.skale_url = kwargs.get('skale_url', 'https://api.skalenodes.com/v1/rhythmic-tegmen')
 
@@ -383,7 +383,7 @@ if __name__ == '__main__':
     # # print the priced trades (trading Key)
     # print(t.trading_key)
     # post trades
-    t.post_trades_polygon('FB:0.1,FNF:0.2,BTCUSDT:0.2,FNV:0.2,PLTR:0.2,GPS:0.2')
+    t.post_trades_polygon('UUP:0.333')
     # export
     t.export_to_csv()
     # log how long it took
