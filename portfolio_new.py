@@ -1,8 +1,9 @@
 import time
 import pandas as pd
 from trade import Trade
+from covey_calendar import CoveyCalendar
 import covey_checks as covey_checks
-from datetime import timedelta
+from datetime import datetime,timedelta
 
 class Portfolio(Trade):
     def __init__(self, **kwargs):
@@ -26,30 +27,39 @@ class Portfolio(Trade):
         df['realized_profit_final'] = df['realized_profit_symbol_agg'] - df['realized_profit']
         df = df[(df['symbol_date_rank'] == 1) & (df['post_cumulative_share_count'] != 0)]
         df['current_position'].fillna(0, inplace=True)
+
+        # dividend logic 
+        dividends_df = pd.read_csv('data/dividend_split.csv')
+        dividends_df = dividends_df[(dividends_df['div_or_split'] == 'dividend') & (dividends_df['payment_date'] == portfolio_date)]
+        dividends_df['payment_date'] = pd.to_datetime(dividends_df['payment_date'])
+        # merge to main df (trading key) and calculate dividends
+        df = pd.merge(left=df, right=dividends_df, on = 'symbol', how='left')
+        df['dividend_cash'] = df['amount'] * df['post_cumulative_share_count']
+
+
         return df[['symbol', 'post_cumulative_share_count', 'vwap', 'current_position', 'realized_profit']]
 
 
     # now get the most recent rolling prices for the unique tickers and date
 
+    # def getDayDividends(self, endDate):
+    #     df = pd.read_csv('data/dividend_split.csv')
+    #     df['payment_date'] = pd.to_datetime(df['payment_date'])
+    #     df = df[(df['div_or_split'] == 'dividend') & (df['payment_date'] == endDate)][['symbol','amount']]
+    #     df.set_index('symbol',inplace=True)
+    #     df = df.to_dict()
+    #     return df['amount']
 
-    def getDayDividends(self, endDate):
-        df = pd.read_csv('data/dividend_split.csv')
-        df['payment_date'] = pd.to_datetime(df['payment_date'])
-        df = df[(df['div_or_split'] == 'dividend') & (df['payment_date'] == endDate)][['symbol','amount']]
-        df.set_index('symbol',inplace=True)
-        df = df.to_dict()
-        return df['amount']
-
-    def getCashChangeFromDividends(self, endDate, activeTrades):
-        activeDividends = self.getDayDividends(endDate)
-        dividendCash = 0
-        for trade in activeTrades.keys():
-            if trade in activeDividends:
-                dividendPayment = float(activeTrades[trade]) * float(activeDividends[trade])
-            else :
-                dividendPayment = 0
-            dividendCash += dividendPayment
-        return dividendCash
+    # def getCashChangeFromDividends(self, endDate, activeTrades):
+    #     activeDividends = self.getDayDividends(endDate)
+    #     dividendCash = 0
+    #     for trade in activeTrades:
+    #         if trade in activeDividends:
+    #             dividendPayment = float(activeTrades[trade]) * float(activeDividends[trade])
+    #         else :
+    #             dividendPayment = 0
+    #         dividendCash += dividendPayment
+    #     return dividendCash
 
     def getDaySplits(self, endDate):
         df = pd.read_csv('data/dividend_split.csv')
@@ -61,7 +71,7 @@ class Portfolio(Trade):
 
     def getEntryAndPostCumShareFromSplits(self, tradingKey, endDate, activeIds):
         activeSplits = self.getDaySplits(endDate)
-        for trade in activeIds.keys():
+        for trade in activeIds:
             if trade in activeSplits:
                 # update adjusted_entry
                 tradingKey['adjusted_entry'].at[activeIds[trade]] = tradingKey['vwap'].at[activeIds[trade]]
@@ -114,23 +124,20 @@ class Portfolio(Trade):
 
         # generate dates based off price key
         prices = self.price_key
-        new_portfolio = prices.copy()
-        new_portfolio.drop(columns=['vwap', 'symbol'], inplace=True)
-        new_portfolio.drop_duplicates(inplace=True)
-        new_portfolio['timestamp'] = new_portfolio['timestamp'].dt.tz_localize(None)
-        new_portfolio['max_timestamp'] = new_portfolio.groupby('delayed_trade_date')['timestamp'].transform(max)
-        new_portfolio.drop(columns=['delayed_trade_date', 'timestamp'], inplace=True)
-        new_portfolio.drop_duplicates(inplace=True)
-        new_portfolio.set_index('max_timestamp', inplace=True)
-        portfolio = pd.concat([portfolio, new_portfolio])
+
+        # calendar key 
+        c = CoveyCalendar(start_date = prices['delayed_trade_date'].min())
+        calendar_key = c.set_business_dates()
+        calendar_key_df = pd.DataFrame(calendar_key[calendar_key['date'] < datetime.now().replace(hour=0,minute=0, second=0, microsecond =0)]['next_market_close'].unique()).set_index(0)
+        calendar_key_df.index = calendar_key_df.index.append(pd.Index([prices.reset_index()['timestamp'].max()]))
+        portfolio = pd.concat([portfolio, calendar_key_df])
         portfolio['user_id'] = portfolio['user_id'].ffill()
         prices.set_index('timestamp', inplace=True)
-        prices.sort_index(ascending=True, inplace=True)
-        prices['delayed_trade_date'] = pd.to_datetime(prices['delayed_trade_date'])
 
         # create an empty list that will be populated by dictionaries, after which
         # we will use a pd.from_records method to finalize the positions dataframe
         positions_list = []
+
 
         # iterate through the new portfolio object with the recent trading activity being included
         # perform the math for portfolio
@@ -158,7 +165,7 @@ class Portfolio(Trade):
             new_trades = trading_key[(trading_key['market_entry_date_time'] > start_date) &
                                      (trading_key['market_entry_date_time'] <= end_date)]
 
-
+            new_trades = new_trades.sort_values(by = 'entry_date_time')
 
             # if we have trades
             if len(new_trades.index) > 0:
@@ -241,7 +248,7 @@ class Portfolio(Trade):
 
             else:
                 # check for dividends
-                dividendCash = self.getCashChangeFromDividends(end_date.replace(hour=0, minute=0, microsecond=0,
+                dividendCash = self.getCashChangeFromDividends(end_date.replace(hour= 0, minute= 0, microsecond=0,
                                                                                 second=0),
                                                              active_trade_stats_df['symbol'].unique())
 
@@ -335,13 +342,13 @@ class Portfolio(Trade):
         # export to csv
     def export_to_csv(self, key: str = 'trading'):
         if key == 'trading':
-            self.trading_key.to_csv('output/trading_key.csv', index=False)
+            self.trading_key.to_csv('output/trading_key_test.csv', index=False)
         elif key == 'price':
-            self.price_key.to_csv('output/price_key.csv')
+            self.price_key.to_csv('output/price_key_test.csv')
         elif key == 'portfolio':
-            self.portfolio.to_csv('output/portfolio.csv')
+            self.portfolio.to_csv('output/portfolio_test.csv')
         elif key == 'crypto_check':
-            self.unpriced_crypto.to_csv('checks/unpriced_crypto_{}.csv'.format(self.address))
+            self.unpriced_crypto.to_csv('checks/unpriced_crypto_test_{}.csv'.format(self.address))
 
 if __name__ == '__main__':
     # start the timer
@@ -362,7 +369,7 @@ if __name__ == '__main__':
 
     #p = Portfolio(address='0x0d97A0E7e42eB70d013a2a94179cEa0E815dAE41')
 
-    p = Portfolio(address='0xd019955e5Db68ebd41CE5A7A327DdD5f2658e8D9')
+    p = Portfolio(address='0x594F56D21ad544F6B567F3A49DB0F9a7B501FF37')
 
     p.export_to_csv(key='trading')
     p.export_to_csv(key='price')
