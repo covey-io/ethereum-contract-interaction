@@ -66,7 +66,6 @@ class Portfolio(Trade):
         #print(dateAsOf)
         #print(pd.DataFrame(df))
 
-
         return shareList, priceList, idList, currentList, realizedList
 
     # now get the most recent rolling prices for the unique tickers and date
@@ -137,7 +136,6 @@ class Portfolio(Trade):
                      'adjusted_entry'
                      ]] = 0
 
-
         # earliest trade date as start date
         start_date = trading_key['market_entry_date_time'].min() + timedelta(days=-1)
 
@@ -163,22 +161,12 @@ class Portfolio(Trade):
 
         # generate dates based off price key
         prices = self.price_key
-        #new_portfolio = prices.copy()
 
         # calendar key 
         c = CoveyCalendar(start_date = prices['delayed_trade_date'].min())
         calendar_key = c.set_business_dates()
         calendar_key_df = pd.DataFrame(calendar_key[calendar_key['date'] < datetime.now().replace(hour=0,minute=0, second=0, microsecond =0)]['next_market_close'].unique()).set_index(0)
         calendar_key_df.index = calendar_key_df.index.append(pd.Index([prices.reset_index()['timestamp'].max()]))
-
-        #new_portfolio.drop(columns=['vwap', 'symbol'], inplace=True)
-        #new_portfolio.drop_duplicates(inplace=True)
-        # new_portfolio['timestamp'] = new_portfolio['timestamp'].dt.tz_localize(None)
-        # new_portfolio['max_symbol_timestamp'] = new_portfolio.groupby(['delayed_trade_date','symbol'])['timestamp'].transform(max)
-        # new_portfolio['common_timestamp_denominator'] = new_portfolio.groupby('delayed_trade_date')['max_symbol_timestamp'].transform(min)
-        # new_portfolio.drop(columns=['delayed_trade_date', 'timestamp','max_symbol_timestamp','vwap', 'symbol'], inplace=True)
-        # new_portfolio.drop_duplicates(inplace=True)
-        # new_portfolio.set_index('common_timestamp_denominator', inplace=True)
         portfolio = pd.concat([portfolio, calendar_key_df])
         portfolio['user_id'] = portfolio['user_id'].ffill()
         prices.set_index('timestamp', inplace=True)
@@ -229,8 +217,8 @@ class Portfolio(Trade):
                     prior_positions = trading_key.loc[(trading_key['symbol'] == ticker) & (trading_key.index < tradeId)]
                     prior_positions.sort_index(inplace=True)
                     if len(prior_positions) > 0:
-                        prior_shares = prior_positions['post_cumulative_share_count'].iat[-1]  ## grabbing the most recent one.
-                        prior_price = prior_positions['vwap'].iat[-1]  ## grabbing the most recent one.
+                        prior_shares = prior_positions['post_cumulative_share_count'].iat[-1]  # grabbing the most recent one.
+                        prior_price = prior_positions['vwap'].iat[-1]  # grabbing the most recent one.
                         prior_trade_id = prior_positions.index[-1]  # grabbing most recent
                         prior_profit = (price - prior_price) * prior_shares
                         trading_key['realized_profit'].at[prior_trade_id] = prior_profit
