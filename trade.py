@@ -6,7 +6,7 @@ import pandas as pd
 import nest_asyncio
 from web3 import Web3
 from price import Pricer
-from datetime import timedelta
+from datetime import datetime, timedelta
 from dotenv import load_dotenv
 from eth_account import account
 from covey_calendar import CoveyCalendar
@@ -62,11 +62,27 @@ class Trade:
         self.transform_trades()
 
         # generate price key
-        p = Pricer(start= self.trades['entry_date'].min().strftime('%Y-%m-%d'), symbols=self.trades['symbol'].unique())
+        p = Pricer(start= self.get_min_trade_entry(), symbols=self.get_symbols())
         self.price_key = p.price_key
 
         # generate trading key with prices
         self.trading_key = self.get_trading_key()
+    
+    # setter for symbols
+    def get_symbols(self):
+        if len(self.trades.index) < 1:
+            return []
+        else:
+            return self.trades['symbol'].unique()
+
+
+    # get minimum start date
+    def get_min_trade_entry(self):
+        if len(self.trades.index) < 1:
+            return datetime.date(2021,12,31).strftime('%Y-%m-%d')
+        else:
+            return self.trades['entry_date'].min().strftime('%Y-%m-%d')
+
 
     # getter to return the address from child class if needed, or in current class - either works
     def get_address(self):
@@ -110,8 +126,8 @@ class Trade:
         covey_ledger = w3.eth.contract(address=self.covey_ledger_polygon_address, abi=self.abi)
         my_address = w3.toChecksumAddress(self.address)
         nonce = w3.eth.get_transaction_count(my_address)
-        gas = covey_ledger.functions.createContent(positionString).estimateGas({'from': my_address, 'nonce': nonce})
-        txn = covey_ledger.functions.createContent(positionString).buildTransaction({
+        gas = covey_ledger.functions.createContent(positionString).estimate_gas({'from': my_address, 'nonce': nonce})
+        txn = covey_ledger.functions.createContent(positionString).build_transaction({
             'chainId': int(self.polygon_chain_id),
             'gas': gas,
             'nonce': nonce,
@@ -367,10 +383,11 @@ class Trade:
 
     # export to csv
     def export_to_csv(self, key : str = 'trading'):
-        if key == 'trading':
-            self.trading_key.to_csv('output/trading_key.csv', index=False)
-        elif key == 'price':
-            self.price_key.to_csv('output/price_key.csv', index=False)
+        if len(self.trading_key.index) > 0:
+            if key == 'trading':
+                self.trading_key.to_csv('output/trading_key.csv', index=False)
+            elif key == 'price':
+                self.price_key.to_csv('output/price_key.csv', index=False)
 
 
 if __name__ == '__main__':
