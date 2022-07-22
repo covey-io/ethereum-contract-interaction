@@ -2,6 +2,7 @@ import json
 import time
 import asyncio
 import eth_keys
+import os
 import pandas as pd
 import nest_asyncio
 from web3 import Web3
@@ -24,17 +25,17 @@ class Trade:
         self.gethWeb3 = Web3(Web3.IPCProvider())
 
         # get the address, default to Brooker
-        self.address = kwargs.get('address', '0x1aBA07FE746E690D917117315cd42C6DAd6cb4C6')
+        self.address = kwargs.get('address', os.environ['WALLET'])
 
         # wallet (address) secret key
         self.address_private = kwargs.get('address_private',
-                                      'baf62ad09bb993c666577d435845cfe34a255473904186dde18f54438a430940')
+                                      os.environ['WALLET_PRIVATE_KEY'])
         # skale url
         self.skale_url = kwargs.get('skale_url', 'https://api.skalenodes.com/v1/rhythmic-tegmen')
 
         # infura urls - should already come in as a package deal of the infura url + infura project id
         self.infura_url = kwargs.get('infura_url',
-                                     'https://polygon-mainnet.infura.io/v3/83add7805f9441e08cc04d9f7d0fce08')
+                                     'https://polygon-mainnet.infura.io/v3/' + os.environ['INFURA_PROJECT_ID'])
 
         # covey ledger address (SKALE)
         self.covey_ledger_skale_address = kwargs.get('covey_ledger_skale_address',
@@ -224,6 +225,9 @@ class Trade:
             # conversion for merge
             self.trades['entry_date'] = pd.to_datetime(self.trades['entry_date'])
 
+            # sort the trades and set the index
+            self.trades.sort_values(by='entry_date_time', ascending=True)
+
             # set the trade ID
             self.trades['trade_id'] = [x for x in range(1, len(self.trades.values) + 1)]
 
@@ -350,6 +354,8 @@ class Trade:
 
             df_post_merge_check = self.merger_check(df[columns_to_return])
 
+            df_post_merge_check.set_index('trade_id',inplace=True)
+
             return df_post_merge_check
 
         else:
@@ -396,11 +402,11 @@ if __name__ == '__main__':
     # initialize trade data object - all defaults
     t = Trade()
     # # print initial trade pull
-    # print(t.trades)
+    print(t.trades)
     # # print the priced trades (trading Key)
-    # print(t.trading_key)
+    # print(t.trading_key.dtypes)
     # post trades
-    t.post_trades_polygon('UUP:0.333')
+    # t.post_trades_polygon('UUP:0.33')
     # export
     t.export_to_csv()
     # log how long it took

@@ -1,9 +1,11 @@
 import time
 import pandas as pd
 from trade import Trade
-from covey_calendar import CoveyCalendar
 import covey_checks as covey_checks
-from datetime import datetime,timedelta
+from dataclasses import make_dataclass
+from covey_calendar import CoveyCalendar
+from datetime import date, datetime,timedelta
+
 
 class Portfolio(Trade):
     def __init__(self, **kwargs):
@@ -12,78 +14,22 @@ class Portfolio(Trade):
         self.start_cash = kwargs.get('start_cash', 10000)
         # default annual interest to 0.2 %
         self.ann_interest = kwargs.get('ann_interest', 0.02)
-        # generate the portfolio
-        self.portfolio = self.updatePortfolioMath()
+        # initialize the portfolio
+        self.reset_portfolio()
+        # initialize trading_key portfolio derived columns
+        self.set_trading_key()
         # generate crypto pricing error report
         self.unpriced_crypto = covey_checks.check_crypto_tickers(self.trading_key)
+    
+    def get_start_date(self, day_offset : int = 0) -> datetime:
+        if len(self.trades.index) > 1:
+            start_date = self.trading_key['market_entry_date_time'].min() + timedelta(days= day_offset)
+            return start_date.replace(hour=0)
+        else:
+            return datetime(year=2021,month=12,day=31)
 
-
-    def get_recent_trade_stats(self, portfolio_date, trading_key):
-        df = trading_key.copy()
-        df = df[(df['market_entry_date_time'] < portfolio_date) ]
-        df['symbol_date_rank'] = df.groupby('symbol')['market_entry_date_time'].rank('dense', ascending=False)
-        # realized profit sum partitioned by symbol
-        df['realized_profit_symbol_agg'] = df.groupby('symbol')['realized_profit'].transform(sum)
-        df['realized_profit_final'] = df['realized_profit_symbol_agg'] - df['realized_profit']
-        df = df[(df['symbol_date_rank'] == 1) & (df['post_cumulative_share_count'] != 0)]
-        df['current_position'].fillna(0, inplace=True)
-
-        # dividend logic 
-        dividends_df = pd.read_csv('data/dividend_split.csv')
-        dividends_df = dividends_df[(dividends_df['div_or_split'] == 'dividend') & (dividends_df['payment_date'] == portfolio_date)]
-        dividends_df['payment_date'] = pd.to_datetime(dividends_df['payment_date'])
-        # merge to main df (trading key) and calculate dividends
-        df = pd.merge(left=df, right=dividends_df, on = 'symbol', how='left')
-        df['dividend_cash'] = df['amount'] * df['post_cumulative_share_count']
-
-
-        return df[['symbol', 'post_cumulative_share_count', 'vwap', 'current_position', 'realized_profit']]
-
-
-    # now get the most recent rolling prices for the unique tickers and date
-
-    # def getDayDividends(self, endDate):
-    #     df = pd.read_csv('data/dividend_split.csv')
-    #     df['payment_date'] = pd.to_datetime(df['payment_date'])
-    #     df = df[(df['div_or_split'] == 'dividend') & (df['payment_date'] == endDate)][['symbol','amount']]
-    #     df.set_index('symbol',inplace=True)
-    #     df = df.to_dict()
-    #     return df['amount']
-
-    # def getCashChangeFromDividends(self, endDate, activeTrades):
-    #     activeDividends = self.getDayDividends(endDate)
-    #     dividendCash = 0
-    #     for trade in activeTrades:
-    #         if trade in activeDividends:
-    #             dividendPayment = float(activeTrades[trade]) * float(activeDividends[trade])
-    #         else :
-    #             dividendPayment = 0
-    #         dividendCash += dividendPayment
-    #     return dividendCash
-
-    def getDaySplits(self, endDate):
-        df = pd.read_csv('data/dividend_split.csv')
-        df['payment_date'] = pd.to_datetime(df['payment_date'])
-        df = df[(df['div_or_split'] == 'split') & (df['payment_date'] == endDate)][['symbol', 'amount']]
-        df.set_index('symbol', inplace=True)
-        df = df.to_dict()
-        return df['amount']
-
-    def getEntryAndPostCumShareFromSplits(self, tradingKey, endDate, activeIds):
-        activeSplits = self.getDaySplits(endDate)
-        for trade in activeIds:
-            if trade in activeSplits:
-                # update adjusted_entry
-                tradingKey['adjusted_entry'].at[activeIds[trade]] = tradingKey['vwap'].at[activeIds[trade]]
-                tradingKey['vwap'].at[activeIds[trade]] = tradingKey['vwap'].at[activeIds[trade]] * activeSplits[trade]
-                tradingKey['post_cumulative_share_count'].at[activeIds[trade]] = tradingKey['post_cumulative_share_count'].at[activeIds[trade]] / activeSplits[trade]
-        return tradingKey
-
-    def updatePortfolioMath(self):
-
-        # for testing
-        #trading_key = trading_key[trading_key['trade_id'] == 1]
-
+    def set_trading_key(self):
+        self.trading_key = self.trading_key[~self.trading_key['vwap'].isnull()]
         self.trading_key[[
             'post_cumulative_share_count',
             'realized_profit',
@@ -96,250 +42,184 @@ class Portfolio(Trade):
             'post_cumulative_share_count',
             'adjusted_entry'
         ]] = 0
+        return 0
 
-        trading_key = self.trading_key.copy()
+    def reset_portfolio(self):
+        # create the portfolio row entry dataclass 
+        portfolio_entry = make_dataclass('portfolio_entry',
+        [('date_time',datetime),
+        ('cash',float),
+        ('usd_value',float), 
+        ('positions_usd',float),
+        ('long_exposure_usd',float),
+        ('short_exposure_usd',float),
+        ('gross_traded_usd',float),
+        ('net_traded_usd',float),
+        ('unrealized_long_pnl',float), 
+        ('unrealized_short_pnl',float),
+        ('realized_long_pnl',float), 
+        ('realized_short_pnl',float)])
+        
+        # initialize the first row of the portfolio - start date, start cash, and remanining 9 zeros 
+        self.portfolio = pd.DataFrame([portfolio_entry(self.get_start_date(-1), self.start_cash, self.start_cash,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0)])
+        
+        # set the index to be date_time
+        self.portfolio.set_index('date_time', inplace=True)
 
-        # earliest trade date as start date
-        start_date = trading_key['market_entry_date_time'].min() + timedelta(days=-1)
-
-        trading_key = trading_key[~trading_key['vwap'].isnull()]
-
-        # initialize new portfolio
-        portfolio = pd.DataFrame({'date_time': start_date.strftime('%Y-%m-%d'),
-                                  'user_id': self.address, 'cash': self.start_cash,
-                                  'usd_value': self.start_cash ,'positions_usd': 0,
-                                  'inception_return': 1.0, 'gross_exposure_usd': 0.0,
-                                  'long_exposure_usd': 0.0,'short_exposure_usd': 0.0,
-                                  'net_exposure_usd': 0.0, 'gross_exposure_percent': 0.0,
-                                  'long_exposure_percent': 0.0, 'short_exposure_percent': 0.0,
-                                  'net_exposure_percent': 0.0, 'gross_traded_usd': 0.0,
-                                  'net_traded_usd': 0.0, 'gross_traded_percent': 0.0, 'net_traded_percent': 0.0,
-                                  'unrealized_long_pnl': 0.0, 'unrealized_short_pnl': 0.0, 'unrealized_pnl': 0.0,
-                                  'realized_long_pnl': 0.0, 'realized_short_pnl': 0.0, 'realized_pnl': 0.0,
-                                  'total_long_pnl': 0.0, 'total_short_pnl': 0.0, 'total_pnl': 0.0,
-                                  'marker': 'FIRST'}, index = [0])
-
-        portfolio['date_time'] = pd.to_datetime(portfolio['date_time'])
-        portfolio.set_index('date_time', inplace=True)
-
-        # generate dates based off price key
-        prices = self.price_key
-
-        # calendar key 
-        c = CoveyCalendar(start_date = prices['delayed_trade_date'].min())
+        # fill in the rest of the date index using covey calender market close times
+        c = CoveyCalendar(start_date = self.get_start_date().strftime('%Y-%m-%d'))
         calendar_key = c.set_business_dates()
-        calendar_key_df = pd.DataFrame(calendar_key[calendar_key['date'] < datetime.now().replace(hour=0,minute=0, second=0, microsecond =0)]['next_market_close'].unique()).set_index(0)
-        calendar_key_df.index = calendar_key_df.index.append(pd.Index([prices.reset_index()['timestamp'].max()]))
-        portfolio = pd.concat([portfolio, calendar_key_df])
-        portfolio['user_id'] = portfolio['user_id'].ffill()
-        prices.set_index('timestamp', inplace=True)
+        max_calendar_date = min(self.price_key.reset_index()['timestamp'].max(),calendar_key['next_market_close'].max())
+        calendar_mask = calendar_key['next_market_close'] <= max_calendar_date
+        calendar_key_df = pd.DataFrame(calendar_key[calendar_mask]['next_market_close'].unique())
+        
+        # set the calendar index to be datetime so we can concat easily
+        calendar_key_df.set_index(0, inplace=True)
 
-        # create an empty list that will be populated by dictionaries, after which
-        # we will use a pd.from_records method to finalize the positions dataframe
-        positions_list = []
+        # attach the dates back to the original portfolio row
+        self.portfolio = pd.concat([self.portfolio, calendar_key_df])
 
+        return 0
 
-        # iterate through the new portfolio object with the recent trading activity being included
-        # perform the math for portfolio
-        for row in range(1, len(portfolio.index)):
-            portfolio.sort_index(ascending=True, inplace=True)
-            # get get period
-            end_date = portfolio.index[row] #.replace(tzinfo=None)
-            start_date = portfolio.index[row - 1] #.replace(tzinfo=None)
-            prior_cash = portfolio['cash'].iat[row - 1]
-            daily_interest = self.ann_interest * (end_date - start_date) / timedelta(days=365)
+    def get_recent_trade_stats(self, portfolio_date, trading_key):
+        df = trading_key.copy()
+        df = df[(df['market_entry_date_time'] < portfolio_date) ]
+        df['symbol_date_rank'] = df.groupby('symbol')['market_entry_date_time'].rank('dense', ascending=False)
+        
+        # realized profit sum partitioned by symbol
+        df['realized_profit_symbol_agg'] = df.groupby('symbol')['realized_profit'].transform(sum)
+        df['realized_profit_final'] = df['realized_profit_symbol_agg'] - df['realized_profit']
+        df = df[(df['symbol_date_rank'] == 1) & (df['post_cumulative_share_count'] != 0)]
+        df['current_position'].fillna(0, inplace=True)
 
-            # set up a new starting cash balance and calculate any interest cost for leverage
-            cash_interest_payment = 0 if prior_cash > 0 else prior_cash * daily_interest
+        # dividend logic 
+        dividends_df = pd.read_csv('data/dividend_split.csv')
+        dividends_df['payment_date'] = pd.to_datetime(dividends_df['payment_date'])
+        dividends_df = dividends_df[(dividends_df['div_or_split'] == 'dividend') & (dividends_df['payment_date'] == portfolio_date)][['symbol','amount']]
+        
+        # merge to main df (trading key) and calculate dividends
+        df = pd.merge(left=df, right=dividends_df, on = 'symbol', how='left')
+        df.rename(columns={'amount':'div_amount'}, inplace=True)
+        df['dividend_cash'] = df['div_amount'] * df['post_cumulative_share_count']
 
-            cash_change = 0
-            gross_cash_change = 0
-            long_realized_profit = 0
-            short_realized_profit = 0
-            new_cash = prior_cash + cash_interest_payment
-            # get the previous portfolio value
-            prior_portfolio_usd = portfolio['usd_value'].iat[row - 1]
+        # split logic
+        splits_df = pd.read_csv('data/dividend_split.csv')
+        splits_df['payment_date'] = pd.to_datetime(splits_df['payment_date'])
+        splits_df = splits_df[(splits_df['div_or_split'] == 'split') & (splits_df['payment_date'] == portfolio_date)][['symbol', 'amount']]
+        df = pd.merge(left=df, right=splits_df, on = 'symbol', how='left')
+        df.rename(columns={'amount':'split_amount'}, inplace=True)
+        df['adjusted_entry'] = df['vwap']
+        df['vwap'] = df['vwap'] * df['split_amount'] 
+        df['post_cumulative_share_count'] = df['post_cumulative_share_count'] / df['split_amount'] 
 
-            # grab the new trades (in scope of the time period)
-            trading_key['market_entry_date_time'] = pd.to_datetime(trading_key['market_entry_date_time'])
-            new_trades = trading_key[(trading_key['market_entry_date_time'] > start_date) &
-                                     (trading_key['market_entry_date_time'] <= end_date)]
+        return df[['symbol', 'post_cumulative_share_count', 'vwap', 'current_position', 'realized_profit', 'dividend_cash']]
 
-            new_trades = new_trades.sort_values(by = 'entry_date_time')
+    def update_trading_key(self,df, prior_portfolio_usd):
+        df = df.sort_values(by='entry_date_time', ascending = True)
+        df['rank'] = df['entry_date_time'].rank(method = 'dense', ascending=False)
 
-            # if we have trades
-            if len(new_trades.index) > 0:
-                for trade in range(0, len(new_trades.index)):
-                    # first figure out the old vs. new position size and proposed cash impact
-                    ticker = new_trades['symbol'].iat[trade]
-                    price = new_trades['vwap'].iat[trade]
-                    percent = new_trades['target_percentage'].iat[trade]
-                    tradeId = new_trades.index[trade]
+        # get the previous price 
+        df['vwap_prev'] = df['vwap'].shift(-1).fillna(df['vwap'])
 
-                    # Check if there are prior positions:
-                    prior_positions = trading_key.loc[(trading_key['symbol'] == ticker) & (trading_key.index < tradeId)]
-                    prior_positions.sort_index(inplace=True)
-                    if len(prior_positions) > 0:
-                        prior_shares = prior_positions['post_cumulative_share_count'].iat[-1]  ## grabbing the most recent one.
-                        prior_price = prior_positions['vwap'].iat[-1]  ## grabbing the most recent one.
-                        prior_trade_id = prior_positions.index[-1]  # grabbing most recent
-                        prior_profit = (price - prior_price) * prior_shares
-                        trading_key['realized_profit'].at[prior_trade_id] = prior_profit
-                        if prior_shares > 0:
-                            long_realized_profit += prior_profit
-                        else:
-                            short_realized_profit += prior_profit
-                    else:
-                        prior_shares = 0
-                        prior_profit = 0
+        # prior share count
+        df['prior_cumulative_share_count'] = df['post_cumulative_share_count'].shift(-1).fillna(0)
 
-                    prior_value = price * prior_shares
+        # filter df to grab the most recent trading block - since we already took all the prev values we needed 
+        df_latest = df.loc[df['rank']==1]
 
-                    new_value = float(percent) * prior_portfolio_usd
-                    cash_hit = prior_value - new_value
-                    # now get feeAdj price
-                    change_in_shares = (cash_hit * -1) / (price)
+        # prior portfolio value
+        df_latest['prior_portfolio_value'] = prior_portfolio_usd
 
-                    # now save the trade info
-                    trading_key['prior_portfolio_value'].at[tradeId] = prior_portfolio_usd
-                    #trading_key['target_position_value'].at[tradeId] = new_value
-                    trading_key['current_position'].at[tradeId] = new_value
-                    trading_key['prior_position_value'].at[tradeId] = prior_value
-                    trading_key['cash_used'].at[tradeId] = cash_hit
-                    trading_key['share_count'].at[tradeId] = change_in_shares
-                    trading_key['prior_cumulative_share_count'].at[tradeId] = prior_shares
-                    trading_key['post_cumulative_share_count'].at[tradeId] = prior_shares + change_in_shares
+        # current position
+        df_latest['current_position'] = float(df_latest['target_percentage']) * df_latest['prior_portfolio_value']
 
-                    # now tally the cash impact of the trades
-                    cash_change += cash_hit
-                    gross_cash_change += abs(cash_hit)
+        # prior position value 
+        df_latest['prior_position_value'] = df_latest['prior_cumulative_share_count'] * df_latest['vwap']
+        
+        # cash used
+        df_latest['cash_used'] = df_latest['prior_position_value'] - df_latest['current_position']
 
-                # once all trades have been calculated save the trade data
-                new_cash += cash_change
-                new_cash += (gross_cash_change * -0.0005)  # assume a 5bps fee
-                portfolio['gross_traded_usd'].iat[row] = gross_cash_change
-                portfolio['net_traded_usd'].iat[row] = -cash_change
-                portfolio['gross_traded_percent'].iat[row] = gross_cash_change / prior_portfolio_usd
-                portfolio['net_traded_percent'].iat[row] = -cash_change / prior_portfolio_usd
+        # share count
+        df_latest['share_count'] = (df_latest['cash_used'] * -1) / df_latest['vwap']
 
+        # post cumulative share count
+        df_latest['post_cumulative_share_count'] = df_latest['prior_cumulative_share_count'] + df_latest['share_count']
 
-            active_trade_stats_df = self.get_recent_trade_stats(end_date, trading_key)
+        # update df from df_latest findings
+        df.update(df_latest)
 
-            active_prices_df = prices.loc[prices.delayed_trade_date == end_date.replace(hour=0)]
+        # update most recent trade before the current one (if it exists) for realized profit, otherwise don't do anything
+        if len(df.loc[df['rank']==2].index) > 0:
+            df.loc[df['rank']==2, 'realized_profit'] = (df.loc[df['rank']==2,'vwap'] - df.loc[df['rank']==2,'vwap_prev']) * df.loc[df['rank']==2,'prior_cumulative_share_count']
+        else:
+            df.loc[df['rank']==1, 'realized_profit'] = 0
 
-            active_prices_df = active_prices_df.sort_index().groupby('symbol').tail(1)
+        # update main trading key
+        self.trading_key.update(df)
 
-            active_prices_dict = active_prices_df[['symbol', 'vwap']].set_index('symbol').to_dict().get('vwap')
+        # update the portfolio for the current market_entry_date 
+        self.portfolio.loc[self.portfolio.index.date == pd.to_datetime(df['market_entry_date_time'].unique()[0]).date(),
+        ['gross_traded_usd','net_traded_usd','gross_traded_percent','net_traded_percent']] = \
+        [df['cash_used'].abs().sum(), -1* df['cash_used'].sum(),df['cash_used'].abs().sum()/df['prior_portfolio_value'],
+         -1 * df['cash_used'].sum()/df['prior_portfolio_value']]
+
+        return 0
 
 
-            positionsUsd = 0.0
-            shortPositions = 0.0
-            longPositions = 0.0
-            longUnrealizedPnl = 0.0
-            shortUnrealizedPnl = 0.0
+    def evaluate_portfolio_row(self, row):
+        self.portfolio.sort_index(ascending=True)
+        current_loc= self.portfolio.index.get_loc(row.index[0])
+        # start date is really the previous date
+        start_date = self.portfolio.index[current_loc - 1]
+        end_date = self.portfolio.index[current_loc]
+        print(end_date)
+        
+        # daily interest
+        daily_interest = self.ann_interest * (end_date - start_date) / timedelta(days=365)
 
-            lastUsdValue = portfolio['usd_value'].iat[row - 1]
-            marker = portfolio['marker'].iat[row]
-            # check if there are any trades to roll over
+        # get the previous portfolio value
+        prior_portfolio_usd = self.portfolio.loc[start_date,'usd_value']
 
-            # Dividend math at day turnover
-            if end_date.day == start_date.day:
-                dividendCash = 0
+        # get prior cash
+        prior_cash = self.portfolio.loc[start_date,'cash']
 
-            else:
-                # check for dividends
-                dividendCash = self.getCashChangeFromDividends(end_date.replace(hour= 0, minute= 0, microsecond=0,
-                                                                                second=0),
-                                                             active_trade_stats_df['symbol'].unique())
+        # set up a new starting cash balance and calculate any interest cost for leverage
+        cash_interest_payment = 0 if prior_cash > 0 else prior_cash * daily_interest
 
-                # check for splits
-                trading_key = self.getEntryAndPostCumShareFromSplits(trading_key,
-                                                                     end_date.replace(hour=0, minute=0, microsecond=0,
-                                                                                      second=0), active_trade_stats_df.index)
-                print('div-splits - EOD :' + str(start_date) + ' BOD :' + str(end_date))
+        # set up new cash - will pass it into the trade processing
+        new_cash = prior_cash + cash_interest_payment
 
-            if dividendCash > 0:
-                print("{} added in dividend cash on {}".format(dividendCash,end_date))
+        # isolate trades made so far
+        trades_in_scope = self.trading_key[self.trading_key['market_entry_date_time'] <= end_date]
+ 
+        # go through the new trades and see if they had history, update trading key fields accordingly
+        trades_in_scope.groupby(['symbol','market_entry_date_time']).apply(self.update_trading_key,(prior_portfolio_usd))
+        
+        # update cash after most recent trades processed/updated
+        new_cash += trades_in_scope['cash_used'].sum() + trades_in_scope['cash_used'].abs().sum() * -0.0005
+        
+        # look through active trades - these are the trades before the 'trades in scope'
+        # we are updating their metrics now that we handled the new trades
+        active_trade_stats_df = self.get_recent_trade_stats(end_date, self.trading_key)
 
-            new_cash += dividendCash
+        # get the most up to date prices for the tickers we already had trades for
+        active_prices_df = self.price_key.loc[self.price_key.timestamp == end_date]
 
+        # merge active trades with active prices to get the up to date values on all the 
+        # existing positions
+        active_df = pd.merge(left=active_trade_stats_df, right=active_prices_df, how='inner', on='symbol')
 
-            active_trade_stats_df['price'] = active_trade_stats_df.apply(lambda x: active_prices_dict.get(x['symbol'],
-                                                            x['current_position']/x['post_cumulative_share_count']), axis =1)
+        # update portfolio active position(s) value
+        self.portfolio[current_loc,'positions_usd'] = active_df['current_position'].sum()
 
+        # update portfolio cash amount = prior cash + cash used in trading + dividends
+        self.portfolio[current_loc,'cash'] = new_cash + active_df['dividend_cash']
 
-            active_trade_stats_df['position'] = active_trade_stats_df['price'] * \
-                                                            active_trade_stats_df['post_cumulative_share_count']
-            active_trade_stats_df['unrealized_pnl'] = (active_trade_stats_df['price'] - active_trade_stats_df['vwap'])*\
-                                                      active_trade_stats_df['post_cumulative_share_count']
-
-            active_trade_stats_df['position_pnl'] = active_trade_stats_df['unrealized_pnl'] + \
-                                                    active_trade_stats_df['realized_profit']
-
-            active_trade_stats_df['position_roi'] = active_trade_stats_df['position_pnl'] / \
-                                                    (abs(active_trade_stats_df['position']) - active_trade_stats_df['unrealized_pnl'])
-
-            active_trade_stats_df['percent_position'] = active_trade_stats_df['position'] / lastUsdValue
-
-            active_trade_stats_df['position_long'] = active_trade_stats_df.apply(lambda x : x['position'] if x['position'] > 0 else 0, axis =1)
-
-            active_trade_stats_df['unrealized_pnl_long'] = active_trade_stats_df.apply(lambda x: x['unrealized_pnl'] if x['position'] > 0 else 0, axis =1)
-
-            active_trade_stats_df['position_short'] = active_trade_stats_df.apply(lambda x: x['position'] if x['position'] <= 0 else 0, axis =1)
-
-            active_trade_stats_df['unrealized_pnl_short'] = active_trade_stats_df.apply(lambda x: x['unrealized_pnl'] if x['position'] <= 0 else 0, axis =1)
+    def calculate_portfolio(self):
+        self.portfolio.iloc[1:,:].groupby(self.portfolio.index[1:]).apply(self.evaluate_portfolio_row)
 
 
-            trading_key['current_position'] = trading_key.update(active_trade_stats_df['current_position'])
-
-            position = active_trade_stats_df['position'].sum()
-            long_position = active_trade_stats_df['position_long'].sum()
-            short_position = active_trade_stats_df['position_short'].sum()
-            long_unrealized_pnl = active_trade_stats_df['unrealized_pnl_long'].sum()
-            short_unrealized_pnl = active_trade_stats_df['unrealized_pnl_short'].sum()
-
-            # Now save the new portfolio
-            portfolio['positions_usd'].iat[row] = position
-            portfolio['cash'].iat[row] = new_cash
-            portfolio['usd_value'].iat[row] = new_cash + position
-            portfolio['inception_return'].iat[row] = portfolio['usd_value'].iat[row] / portfolio['usd_value'].iat[
-                row - 1] * portfolio['inception_return'].iat[row - 1]
-            portfolio['gross_exposure_usd'].iat[row] = long_position - short_position
-            portfolio['long_exposure_usd'].iat[row] = long_position
-            portfolio['short_exposure_usd'].iat[row] = short_position
-            portfolio['net_exposure_usd'].iat[row] = long_position + short_position
-            portfolio['gross_exposure_percent'].iat[row] = (longPositions - shortPositions) / lastUsdValue
-            portfolio['long_exposure_percent'].iat[row] = longPositions / lastUsdValue
-            portfolio['short_exposure_percent'].iat[row] = shortPositions / lastUsdValue
-            portfolio['net_exposure_percent'].iat[row] = (longPositions + shortPositions) / lastUsdValue
-
-            portfolio['unrealized_long_pnl'].iat[row] = long_unrealized_pnl
-            portfolio['unrealized_short_pnl'].iat[row] = short_unrealized_pnl
-            portfolio['unrealized_pnl'].iat[row] = long_unrealized_pnl + short_unrealized_pnl
-
-            portfolio['realized_long_pnl'].iat[row] = cash_interest_payment + dividendCash + long_realized_profit \
-                                                      + portfolio['realized_long_pnl'].iat[row - 1]
-            portfolio['realized_short_pnl'].iat[row] = short_realized_profit + portfolio['realized_short_pnl'].iat[
-                row - 1]
-            portfolio['realized_pnl'].iat[row] = cash_interest_payment + dividendCash + long_realized_profit + short_realized_profit + \
-                                                    portfolio['realized_pnl'].iat[row - 1]
-
-
-            portfolio['total_long_pnl'].iat[row] = long_unrealized_pnl + \
-                                                    portfolio['realized_long_pnl'].iat[row]
-
-            portfolio['total_short_pnl'].iat[row] = short_unrealized_pnl + \
-                                                    portfolio['realized_short_pnl'].iat[row]
-
-            portfolio['total_pnl'].iat[row] = long_unrealized_pnl + short_unrealized_pnl + portfolio['realized_pnl'].iat[row]
-
-        #positions = pd.DataFrame.from_records(positions_list)
-
-        self.trading_key = trading_key
-
-        return portfolio
-
-        # export to csv
+    # export to csv
     def export_to_csv(self, key: str = 'trading'):
         if key == 'trading':
             self.trading_key.to_csv('output/trading_key_test.csv', index=False)
@@ -353,27 +233,14 @@ class Portfolio(Trade):
 if __name__ == '__main__':
     # start the timer
     start_time = time.time()
-    # load environment variables (used below) that live in the .env file at the root of this project
-    # load_dotenv()
-    # environment variables, pulled from the .env file
-    # address = os.getenv('WALLET')
-    # infura_url = os.getenv('INFURA_URL') + '/' + os.getenv('INFURA_PROJECT_ID')
-    # covey_ledger_polygon_address = os.getenv('COVEY_LEDGER_POLYGON_ADDRESS')
-    # covey_ledger_skale_address = os.getenv('COVEY_LEDGER_SKALE_ADDRESS')
-    # skale_url = os.getenv('SKALE_URL')
-    # p = Portfolio(address='0xd019955e5Db68ebd41CE5A7A327DdD5f2658e8D9',
-    #               infura_url=infura_url,
-    #               skale_url=skale_url,
-    #               covey_ledger_polygon_address=covey_ledger_polygon_address,
-    #               covey_ledger_skale_address=covey_ledger_skale_address)
-
-    #p = Portfolio(address='0x0d97A0E7e42eB70d013a2a94179cEa0E815dAE41')
 
     p = Portfolio(address='0x594F56D21ad544F6B567F3A49DB0F9a7B501FF37')
 
-    p.export_to_csv(key='trading')
-    p.export_to_csv(key='price')
-    p.export_to_csv(key='portfolio')
-    p.export_to_csv(key='crypto_check')
+    print(p.portfolio)
+
+    print(p.trading_key)
+
+    p.calculate_portfolio()
+
 
     print("---Portfolio finished in %s seconds ---" % (time.time() - start_time))

@@ -309,15 +309,15 @@ class Portfolio(Trade):
                     price = activePrices[trade]
                 except:
                     price = activePositions[trade] / cum_shares
+                
                 # Calculate each position value
-
                 position = (cum_shares * price)
                 unrealized_pnl = (price - entry_price) * cum_shares
+
                 # oneSymbolOnly = (tradingKey['symbol'] == trade)
                 realized_pnl = activeRealized[trade]
                 posPnl = realized_pnl + unrealized_pnl
                 posRoi = posPnl / (abs(position) - unrealized_pnl)
-
                 positionsUsd += position
                 percentPosition = position / lastUsdValue
 
